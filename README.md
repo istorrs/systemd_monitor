@@ -8,7 +8,8 @@
 *   **Periodic Polling**: Supplements signal-based monitoring with periodic polling for robustness.
 *   **Configurable Logging**: Logs service events to a specified file (default: `systemd_monitor.log`).
 *   **Statistics Generation**: Parses log files to provide a summary of service activities, including crashes, restarts, starts, and stops.
-*   **Specific Service Targeting**: Monitors a predefined set of services.
+*   **Flexible Configuration**: Supports configuration via JSON files and command-line arguments.
+*   **Specific Service Targeting**: Monitors a configurable set of services.
 *   **Debug Mode**: Offers a `--debug` flag for verbose logging, useful for troubleshooting.
 *   **Graceful Shutdown**: Handles `Ctrl+C` (SIGINT) to stop monitoring, generate final statistics, and exit cleanly.
 
@@ -30,9 +31,26 @@ The script operates in two main capacities:
 
 The `SystemdMonitor` class orchestrates these two components, running the D-Bus monitoring in one thread and periodically generating statistics in another.
 
-## Monitored Services
+## Configuration
 
-The script is hardcoded to monitor the following services:
+The systemd monitor supports flexible configuration through JSON files and command-line arguments. You can create a default configuration file using:
+
+```bash
+python -m systemd_monitor --create-config config.json
+```
+
+### Configuration Options
+
+- `monitored_services`: List of services to monitor (default: see below)
+- `log_file`: Path to log file (default: `systemd_monitor.log`)
+- `poll_interval`: Polling interval in milliseconds (default: 100)
+- `stats_interval`: Statistics generation interval in seconds (default: 60)
+- `max_retries`: Maximum retry attempts for failed operations (default: 3)
+- `debug`: Enable debug logging (default: false)
+
+### Default Monitored Services
+
+The script is configured to monitor the following services by default:
 
 ```
 wirepas-gateway.service
@@ -49,11 +67,9 @@ wps_button_monitor.service
 mosquitto.service
 ```
 
-To change the list of monitored services, you would need to modify the `MONITORED_SERVICES` set within the `systemd_monitor.py` script.
-
 ## Prerequisites
 
-*   Python 3
+*   Python 3.7+
 *   `python-dbus` (or `python3-dbus`)
 *   `python-gi` (or `python3-gi`, `gir1.2-glib-2.0`)
 
@@ -63,30 +79,76 @@ sudo apt-get update
 sudo apt-get install python3 python3-dbus python3-gi
 ```
 
+## Installation
+
+### From Source
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/systemd_monitor.git
+cd systemd_monitor
+```
+
+2. Install the package:
+```bash
+pip install -e .
+```
+
+### Development Installation
+
+For development, install with additional tools:
+```bash
+pip install -e ".[dev]"
+```
+
 ## Usage
 
-1.  **Ensure the script is executable**:
+### Basic Usage
+
+1.  **Run with default configuration**:
     ```bash
-    chmod +x systemd_monitor.py
+    systemd-monitor
     ```
 
-2.  **Run the script**:
+2.  **Run with debug logging**:
     ```bash
-    ./systemd_monitor.py
+    systemd-monitor --debug
     ```
 
-3.  **Run with debug logging**:
+### Advanced Configuration
+
+1.  **Use a custom configuration file**:
     ```bash
-    ./systemd_monitor.py --debug
+    systemd-monitor --config my_config.json
     ```
 
-The script will start monitoring the services and logging events to `systemd_monitor.log` in the same directory. Statistics will be printed to the console periodically (every 60 seconds by default) and upon exiting the script.
+2.  **Override specific settings**:
+    ```bash
+    systemd-monitor --services nginx.service apache2.service --log-file custom.log --debug
+    ```
+
+3.  **Create a default configuration file**:
+    ```bash
+    systemd-monitor --create-config config.json
+    ```
+
+### Command Line Options
+
+- `--debug`: Enable debug logging
+- `--config FILE`: Path to configuration file
+- `--log-file FILE`: Log file path
+- `--services SERVICE [SERVICE ...]`: List of services to monitor
+- `--poll-interval MS`: Polling interval in milliseconds
+- `--stats-interval SEC`: Statistics generation interval in seconds
+- `--create-config FILE`: Create a default configuration file
+
+The script will start monitoring the services and logging events to the specified log file. Statistics will be printed to the console periodically and upon exiting the script.
 
 To stop the monitor, press `Ctrl+C`. It will then perform a final statistics generation before exiting.
 
 ## Output
 
-*   **Log File (`systemd_monitor.log`)**: Contains detailed entries for each detected service event.
+*   **Log File**: Contains detailed entries for each detected service event.
     Example log entry:
     ```
     2023-10-27 10:00:00,123 - INFO - Service: wirepas-gateway, State: active, SubState: running, Source: PropertiesChanged
@@ -102,6 +164,53 @@ To stop the monitor, press `Ctrl+C`. It will then perform a final statistics gen
     ...
     ```
 
+## Development
+
+### Running Tests
+
+```bash
+pytest
+```
+
+### Code Formatting
+
+```bash
+black systemd_monitor/
+```
+
+### Type Checking
+
+```bash
+mypy systemd_monitor/
+```
+
+### Linting
+
+```bash
+flake8 systemd_monitor/
+```
+
+### Pre-commit Hooks
+
+Install pre-commit hooks for automatic code quality checks:
+
+```bash
+pre-commit install
+```
+
 ## Signal Handling
 
 The script includes signal handlers for `SIGINT` (Ctrl+C) to ensure a graceful shutdown. An early signal handler is also in place to catch `Ctrl+C` even during the import phase or initial setup.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Ensure all tests pass
+6. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.

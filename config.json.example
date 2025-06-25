@@ -1,0 +1,21 @@
+{
+  "monitored_services": [
+    "wirepas-gateway.service",
+    "wirepas-sink-ttys1.service",
+    "wirepas-sink-ttys2.service",
+    "edger.connecteddev.service",
+    "edger.endries.service",
+    "devmgmt.service",
+    "hwcheck.service",
+    "provisioning.service",
+    "Node-Configuration.service",
+    "setup_cell_connect.service",
+    "wps_button_monitor.service",
+    "mosquitto.service"
+  ],
+  "log_file": "systemd_monitor.log",
+  "poll_interval": 100,
+  "stats_interval": 60,
+  "max_retries": 3,
+  "debug": false
+} 
