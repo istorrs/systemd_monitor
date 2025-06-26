@@ -1,24 +1,16 @@
 import signal
 import sys
 import threading
-import dbus
-from dbus.mainloop.glib import DBusGMainLoop
-from gi.repository import GLib
 import logging
 from collections import defaultdict
 import re
 import argparse
 import os
 import time
+import dbus
+from dbus.mainloop.glib import DBusGMainLoop
+from gi.repository import GLib
 
-# Set up signal handler before imports to catch Ctrl+C early
-def early_signal_handler(sig, frame):
-    """Handle SIGINT (Ctrl+C) during imports or runtime."""
-    print("\nShutting down...")
-    sys.exit(0)
-
-# Register signal handler immediately
-signal.signal(signal.SIGINT, early_signal_handler)
 
 # List of services to monitor
 MONITORED_SERVICES = {
