@@ -1,19 +1,35 @@
+"""
+Service Monitor for systemd units.
+
+This script monitors a predefined list of systemd services using D-Bus,
+logging their state changes, starts, stops, and crashes to a file.
+It uses GLib.MainLoop for event handling and argparse for command-line
+argument parsing.
+Counters for starts, stops, and crashes are persisted across script runs
+using a JSON file.
+"""
+
+import time
+import logging
+from logging.handlers import RotatingFileHandler
+import argparse
 import signal
 import sys
-import threading
-import logging
-from collections import defaultdict
-import re
-import argparse
+import json
 import os
-import time
+from functools import partial # Used for signal_handler binding
+
 import dbus
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 
+__git_tag__ = "manual_version"
+
+# Set up DBusGMainLoop globally before any D-Bus interaction
+DBusGMainLoop(set_as_default=True)
 
 # List of services to monitor
-MONITORED_SERVICES = {
+MONITORED_SERVICES = [
     'wirepas-gateway.service',
     'wirepas-sink-ttys1.service',
     'wirepas-sink-ttys2.service',
@@ -24,621 +40,464 @@ MONITORED_SERVICES = {
     'provisioning.service',
     'Node-Configuration.service',
     'setup_cell_connect.service',
+    'mosquitto.service',
     'wps_button_monitor.service',
-    'mosquitto.service'
-}
+]
 
-def unescape_unit_name(escaped_name):
-    """Convert escaped systemd unit name back to its original form."""
-    if not escaped_name:
-        return None
-    name = escaped_name
-    # Replace only _2d and _2e with - and .
-    name = re.sub(r'_2d', '-', name)
-    name = re.sub(r'_2e', '.', name)
-    # Remove any remaining underscores (systemd escaping)
-    name = name.replace('_', '')
-    if not name.endswith('.service') and not name.endswith('.mount'):
-        name = name + '.service'
-    return name
+# Path for persistence file
+PERSISTENCE_DIR = '/var/lib/service_monitor'
+PERSISTENCE_FILENAME = 'service_states.json'
+PERSISTENCE_FILE = os.path.join(PERSISTENCE_DIR, PERSISTENCE_FILENAME)
 
-class DBusMonitor:
+# Calculate max service name length for consistent padding
+MAX_SERVICE_NAME_LEN = max(len(s) for s in MONITORED_SERVICES)
+MAX_STATE_NAME_LEN = 12 # "deactivating" is 12 chars, "activating" 10, "inactive" 8
+
+# D-Bus service and object path constants
+SYSTEMD_DBUS_SERVICE = 'org.freedesktop.systemd1'
+SYSTEMD_DBUS_PATH = '/org/freedesktop/systemd1'
+SYSTEMD_MANAGER_INTERFACE = 'org.freedesktop.systemd1.Manager'
+SYSTEMD_UNIT_INTERFACE = 'org.freedesktop.systemd1.Unit'
+SYSTEMD_SERVICE_INTERFACE = 'org.freedesktop.systemd1.Service'
+SYSTEMD_PROPERTIES_INTERFACE = 'org.freedesktop.DBus.Properties'
+
+# Initialize D-Bus connection
+SYSTEM_BUS = dbus.SystemBus()
+SYSTEMD_OBJECT = SYSTEM_BUS.get_object(SYSTEMD_DBUS_SERVICE, SYSTEMD_DBUS_PATH)
+MANAGER_INTERFACE = dbus.Interface(SYSTEMD_OBJECT, SYSTEMD_MANAGER_INTERFACE)
+
+# Dictionary to store service states (will be loaded from file)
+# Includes 'logged_unloaded' flag for initial warning suppression
+SERVICE_STATES = {}
+
+# Mapping of signal numbers to their names
+SIGNAL_NAMES = {num: name for name, num in signal.__dict__.items()
+                if name.startswith('SIG') and not name.startswith('SIG_')}
+
+# --- Setup logging at module level with default log file ---
+LOGGER = logging.getLogger('ServiceMonitor')
+LOGGER.setLevel(logging.INFO)
+DEFAULT_LOG_FILE = '/tmp/service_monitor.log'
+FILE_HANDLER = RotatingFileHandler(DEFAULT_LOG_FILE, maxBytes=1 * 1024 * 1024, backupCount=3)
+FILE_HANDLER.setLevel(logging.INFO)
+FORMATTER = logging.Formatter('%(asctime)s - [%(levelname)s] %(message)s')
+FILE_HANDLER.setFormatter(FORMATTER)
+LOGGER.addHandler(FILE_HANDLER)
+# --- End logging setup ---
+
+def save_state():
     """
-    Monitor specific systemd service state changes via D-Bus signals and polling.
-
-    Attributes:
-        log_file (str): Path to the log file.
-        debug (bool): Enable debug logging.
-        loop: Main event loop.
-        running (bool): Whether the monitor is running.
-        bus: D-Bus system bus connection.
-        manager: D-Bus systemd manager interface.
-        registered_units (set): Set of registered unit names.
-        unit_states (dict): Last known ActiveState for each unit.
-        unit_last_job (dict): Last job type for failed states.
-        subscription_attempts (dict): Subscription attempts per unit.
-        unit_path_to_name (dict): Map from unit path to service name.
+    Saves the current SERVICE_STATES dictionary to a JSON file for persistence.
     """
-    def __init__(self, log_file='systemd_monitor.log', debug=False):
-        """
-        Initialize the DBusMonitor.
+    os.makedirs(PERSISTENCE_DIR, exist_ok=True)
+    try:
+        serializable_states = {}
+        for service, data in SERVICE_STATES.items():
+            serializable_states[service] = {
+                'last_state': data['last_state'],
+                'last_change_time': data['last_change_time'],
+                'starts': data['starts'],
+                'stops': data['stops'],
+                'crashes': data['crashes'],
+                'logged_unloaded': data.get('logged_unloaded', False) # Ensure this key exists
+            }
 
-        Args:
-            log_file (str): Path to the log file.
-            debug (bool): Enable debug logging.
-        """
-        self.log_file = log_file
-        self.debug = debug
-        self._setup_logging()
-        self.loop = None
-        self.running = False
-        self.bus = None
-        self.manager = None
-        self.registered_units = set()
-        self.unit_states = {}  # Track last known ActiveState
-        self.unit_last_job = {}  # Track last job type for failed states
-        self.subscription_attempts = {}  # Track subscription attempts
-        self.unit_path_to_name = {}  # Map unit_path to service_name
+        with open(PERSISTENCE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(serializable_states, f, indent=4)
+        LOGGER.debug("Service states saved to %s", PERSISTENCE_FILE)
+    except IOError as e:
+        LOGGER.error("Error saving service states to %s: %s", PERSISTENCE_FILE, e)
+    except TypeError as e:
+        LOGGER.error("Error serializing service states (check data types): %s", e)
 
-    def _setup_logging(self):
-        """
-        Configure logging for D-Bus events.
-        """
-        self.logger = logging.getLogger('SystemdMonitor')
-        self.logger.setLevel(logging.DEBUG if self.debug else logging.INFO)
-        self.logger.handlers = []
-        file_handler = logging.FileHandler(self.log_file, mode='a')
-        file_handler.setLevel(logging.DEBUG if self.debug else logging.INFO)
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        file_handler.setFormatter(formatter)
-        self.logger.addHandler(file_handler)
-        file_handler.flush = lambda: file_handler.stream.flush()
-        if self.debug:
-            self.logger.debug("Logging initialized for SystemdMonitor")
 
-    def _log_event(self, service, state, substate, job_type=None, source='signal'):
-        """
-        Log service state change events.
+def load_state():
+    """
+    Loads service states from a JSON file.
+    Initializes missing services or counters to default values.
+    """
+    global SERVICE_STATES  # pylint: disable=global-statement
+    if not os.path.exists(PERSISTENCE_FILE):
+        LOGGER.info("Persistence file not found: %s. Initializing new states.", PERSISTENCE_FILE)
+        # Initialize all services to default if no file exists
+        SERVICE_STATES = {service: {'last_state': None, 'last_change_time': None, 'starts': 0,
+                                    'stops': 0, 'crashes': 0, 'logged_unloaded': False}
+                          for service in MONITORED_SERVICES}
+        return
 
-        Args:
-            service (str): Service name.
-            state (str): New state.
-            substate (str): Substate.
-            job_type (str, optional): Job type if applicable.
-            source (str): Source of the event.
-        """
-        if not service or service == '-' or not re.match(r'^[a-zA-Z0-9@._-]+\.?(?:service|mount)?$', service):
-            if self.debug:
-                self.logger.debug(f"Ignoring invalid service name: {service}")
-            return
-        if service not in MONITORED_SERVICES:
-            if self.debug:
-                self.logger.debug(f"Ignoring non-monitored service: {service}")
-            return
-        message = f"Service: {service}, State: {state}, SubState: {substate}, Source: {source}"
-        if job_type:
-            message += f", Job: {job_type}"
-        self.logger.info(message)
-        print(message)
-        for handler in self.logger.handlers:
-            handler.stream.flush()  # Force flush to disk
-        if self.debug:
-            self.logger.debug(f"Logged event: {message}")
+    try:
+        with open(PERSISTENCE_FILE, 'r', encoding='utf-8') as f:
+            loaded_states = json.load(f)
+        LOGGER.info("Service states loaded from %s", PERSISTENCE_FILE)
 
-    def _list_registered_units(self):
-        """
-        List all units registered for monitoring.
-        """
-        if not self.registered_units:
-            message = "No units registered for monitoring."
-        else:
-            message = "Registered units for monitoring:\n" + "\n".join(sorted(self.registered_units))
-        self.logger.info(message)
-        print(message)
+        # Merge loaded states with MONITORED_SERVICES, initializing new services
+        for service in MONITORED_SERVICES:
+            if service in loaded_states:
+                SERVICE_STATES[service] = {
+                    'last_state': loaded_states[service].get('last_state'),
+                    'last_change_time': loaded_states[service].get('last_change_time'),
+                    'starts': loaded_states[service].get('starts', 0),
+                    'stops': loaded_states[service].get('stops', 0),
+                    'crashes': loaded_states[service].get('crashes', 0),
+                    'logged_unloaded': loaded_states[service].get('logged_unloaded', False)
+                }
+            else:
+                # New service not in persistence file, initialize to default
+                SERVICE_STATES[service] = {'last_state': None, 'last_change_time': None, 'starts': 0,
+                                            'stops': 0, 'crashes': 0, 'logged_unloaded': False}
 
-    def _get_unit_name_from_path(self, unit_path):
-        """
-        Query the unit name directly from D-Bus using the unit path.
+        # Remove any services from SERVICE_STATES that are no longer in MONITORED_SERVICES
+        services_to_remove = [s for s in SERVICE_STATES if s not in MONITORED_SERVICES]
+        for service in services_to_remove:
+            del SERVICE_STATES[service]
+            LOGGER.info("Removed unmonitored service from state: %s", service)
 
-        Args:
-            unit_path (str): D-Bus object path for the unit.
+    except (IOError, json.JSONDecodeError) as e:
+        LOGGER.error("Error loading service states from %s: %s. Initializing with default states.",
+                     PERSISTENCE_FILE, e)
+        # Fallback to default if load fails
+        SERVICE_STATES = {service: {'last_state': None, 'last_change_time': None, 'starts': 0,
+                                    'stops': 0, 'crashes': 0, 'logged_unloaded': False}
+                          for service in MONITORED_SERVICES}
 
-        Returns:
-            str or None: The unit name, or None if not found.
-        """
-        try:
-            unit_obj = self.bus.get_object('org.freedesktop.systemd1', unit_path)
-            props = dbus.Interface(unit_obj, 'org.freedesktop.DBus.Properties')
-            unit_name = props.Get('org.freedesktop.systemd1.Unit', 'Id')
-            return str(unit_name)
-        except dbus.exceptions.DBusException as e:
-            if self.debug:
-                self.logger.debug(f"Failed to get unit name for path {unit_path}: {e}")
-            return None
 
-    def _unit_properties_changed(self, interface, changed, invalidated, unit_path):
-        """
-        Handle PropertiesChanged signal for systemd units.
+def handle_properties_changed(service_name, _interface, changed, _invalidated):
+    """
+    Handle PropertiesChanged signal to detect service state changes and crashes,
+    and update persistent counters.
+    """
+    current_active_state = str(changed.get('ActiveState', SERVICE_STATES[service_name]['last_state']))
+    current_sub_state = str(changed.get('SubState', 'unknown'))
+    current_exec_main_status = int(changed.get('ExecMainStatus', 0))
+    current_exec_main_code = int(changed.get('ExecMainCode', 0))
+    current_last_change_time = int(changed.get('StateChangeTimestamp', int(time.time() * 1000000)))
 
-        Args:
-            interface (str): D-Bus interface name.
-            changed (dict): Changed properties.
-            invalidated (list): Invalidated properties.
-            unit_path (str): D-Bus object path for the unit.
-        """
-        self.logger.info(f"PropertiesChanged for unit_path {unit_path}: {changed}, invalidated={invalidated}")
-        service_name = self.unit_path_to_name.get(unit_path)
-        raw_service_name = unit_path.split('/')[-1]
-        if not service_name:
-            service_name = self._get_unit_name_from_path(unit_path) or unescape_unit_name(raw_service_name)
-        if self.debug:
-            self.logger.debug(f"PropertiesChanged for unit_path {unit_path}: resolved to {service_name} (raw: {raw_service_name})")
-        if not service_name or service_name not in MONITORED_SERVICES:
-            if self.debug:
-                self.logger.debug(f"Ignoring PropertiesChanged for non-monitored service: {service_name} (unit_path: {unit_path})")
-            return
-        if self.debug:
-            self.logger.debug(f"PropertiesChanged for {service_name}: changed={changed}, invalidated={invalidated}")
-        if 'ActiveState' in changed or 'SubState' in changed:
-            active_state = changed.get('ActiveState', 'unknown')
-            sub_state = changed.get('SubState', 'unknown')
-            self.unit_states[service_name] = active_state
-            self._log_event(service_name, active_state, sub_state, source='PropertiesChanged')
-        elif 'Result' in changed and changed['Result'] == 'failed':
-            self.unit_states[service_name] = 'failed'
-            self._log_event(service_name, 'failed', 'condition', job_type='condition', source='PropertiesChanged')
-        elif self.debug:
-            self.logger.debug(f"Skipping non-state PropertiesChanged for {service_name}: {changed}")
+    last_state_info = SERVICE_STATES[service_name]
+    last_active_state = last_state_info['last_state']
 
-    def _unit_new(self, unit_name, unit_path):
-        """
-        Handle UnitNew signal to monitor new units.
+    # Important: Do not process if ActiveState hasn't changed, unless it's the very first time.
+    if current_active_state == last_active_state and last_active_state is not None:
+        return
 
-        Args:
-            unit_name (str): Name of the new unit.
-            unit_path (str): D-Bus object path for the unit.
-        """
-        if self.debug:
-            self.logger.debug(f"UnitNew: {unit_name}, Path: {unit_path}")
-        if unit_name in MONITORED_SERVICES:
-            attempt = self.subscription_attempts.get(unit_name, 0) + 1
-            self.subscription_attempts[unit_name] = attempt
+    # Prepare status meaning for crashes
+    status_meaning = SIGNAL_NAMES.get(current_exec_main_status,
+                                      f"signal {current_exec_main_status}") \
+                                      if current_exec_main_code == 2 else \
+                                      current_exec_main_status
+
+    log_message = ""
+    counter_changed = False # Flag to indicate if counters were modified
+
+    # Define state categories for clearer logic.
+    # 'deactivating' is a transient state that leads to a stop, so we consider it
+    # as part of the "non-stopped" state for the purpose of counting a stop *transition*.
+    running_like_states = ['active', 'activating', 'reloading', 'deactivating']
+    stopped_like_states = ['inactive', 'failed', 'dead', 'unloaded'] # 'unloaded' for initial state or if unit completely goes away
+
+    # --- Logic for state transitions and counter updates ---
+
+    # 1. Detect a START
+    # Transition from a 'stopped-like' state (or None) to a 'running-like' state.
+    # Exclude 'deactivating' as a target for a START.
+    if (last_active_state in stopped_like_states or last_active_state is None) and \
+       (current_active_state in ['activating', 'active', 'reloading']):
+        last_state_info['starts'] += 1
+        counter_changed = True
+        log_message = (
+            "Service %s: %s -> %s (START) - Starts: %d, Stops: %d, Crashes: %d",
+            service_name.ljust(MAX_SERVICE_NAME_LEN),
+            (last_active_state if last_active_state else 'None').ljust(MAX_STATE_NAME_LEN),
+            current_active_state.ljust(MAX_STATE_NAME_LEN),
+            last_state_info['starts'],
+            last_state_info['stops'],
+            last_state_info['crashes']
+        )
+        LOGGER.info(*log_message)
+
+    # 2. Detect a STOP or CRASH
+    # Transition from a 'running-like' state to a 'stopped-like' state.
+    elif (last_active_state in running_like_states) and \
+         (current_active_state in stopped_like_states):
+        last_state_info['stops'] += 1
+        counter_changed = True
+        if current_active_state == 'failed':
+            last_state_info['crashes'] += 1
+            log_message = (
+                "Service %s: %s -> %s (**CRASH**)! SubState: %s, Status: %s, Code: %d. "
+                "Crashes: %d, Starts: %d, Stops: %d",
+                service_name.ljust(MAX_SERVICE_NAME_LEN),
+                last_active_state.ljust(MAX_STATE_NAME_LEN),
+                current_active_state.ljust(MAX_STATE_NAME_LEN),
+                current_sub_state,
+                status_meaning,
+                current_exec_main_code,
+                last_state_info['crashes'],
+                last_state_info['starts'],
+                last_state_info['stops']
+            )
+            LOGGER.error(*log_message)
+        else: # It's a clean stop (inactive, dead)
+            log_message = (
+                "Service %s: %s -> %s (STOP) - Starts: %d, Stops: %d, Crashes: %d",
+                service_name.ljust(MAX_SERVICE_NAME_LEN),
+                last_active_state.ljust(MAX_STATE_NAME_LEN),
+                current_active_state.ljust(MAX_STATE_NAME_LEN),
+                last_state_info['starts'],
+                last_state_info['stops'],
+                last_state_info['crashes']
+            )
+            LOGGER.info(*log_message)
+
+    # 3. Handle specific transitions for clarity, without affecting counters if already handled
+    elif last_active_state == 'active' and current_active_state == 'deactivating':
+        log_message = (
+            "Service %s: %s -> %s (SubState: %s)",
+            service_name.ljust(MAX_SERVICE_NAME_LEN),
+            last_active_state.ljust(MAX_STATE_NAME_LEN),
+            current_active_state.ljust(MAX_STATE_NAME_LEN),
+            current_sub_state
+        )
+        LOGGER.info(*log_message)
+    elif last_active_state == 'active' and current_active_state == 'activating':
+        last_state_info['stops'] += 1
+        last_state_info['starts'] += 1
+        counter_changed = True
+        log_message = (
+            "Service %s: %s -> %s (RESTART_CYCLE) - Starts: %d, Stops: %d, Crashes: %d",
+            service_name.ljust(MAX_SERVICE_NAME_LEN),
+            last_active_state.ljust(MAX_STATE_NAME_LEN),
+            current_active_state.ljust(MAX_STATE_NAME_LEN),
+            last_state_info['starts'],
+            last_state_info['stops'],
+            last_state_info['crashes']
+        )
+        LOGGER.info(*log_message)
+    else:
+        log_message = (
+            "Service %s: %s -> %s (SubState: %s)",
+            service_name.ljust(MAX_SERVICE_NAME_LEN),
+            (last_active_state if last_active_state else 'None').ljust(MAX_STATE_NAME_LEN),
+            current_active_state.ljust(MAX_STATE_NAME_LEN),
+            current_sub_state
+        )
+        LOGGER.info(*log_message)
+
+    # --- End Logic for state transitions and counter updates ---
+
+    # Always update last_state after processing
+    last_state_info['last_state'] = current_active_state
+    last_state_info['last_change_time'] = time.strftime(
+        '%Y-%m-%d %H:%M:%S',
+        time.localtime(current_last_change_time / 1000000)
+    )
+    # Reset logged_unloaded flag if service is now in an active state
+    if current_active_state in ['active', 'activating', 'reloading']:
+        last_state_info['logged_unloaded'] = False
+
+    # Save state if counters were changed
+    if counter_changed:
+        save_state()
+
+
+def setup_dbus_monitor():
+    """
+    Set up D-Bus signal monitoring for service state changes.
+
+    Loads persistent states, then initializes current states for all monitored services
+    by polling once, and finally subscribes to D-Bus PropertiesChanged signals for each service.
+
+    Returns:
+        bool: True if D-Bus monitoring setup failed, False otherwise.
+    """
+    # Load persistent states first
+    load_state()
+
+    try:
+        # First, ensure systemd will emit signals to us
+        MANAGER_INTERFACE.Subscribe()
+        LOGGER.info("Successfully subscribed to systemd D-Bus signals.")
+
+        # Initial logging of service states
+        for service_name in MONITORED_SERVICES:
+            current_props = _get_initial_service_properties(service_name)
+            if current_props:
+                if SERVICE_STATES[service_name]['last_state'] != current_props['ActiveState'] or \
+                   SERVICE_STATES[service_name]['last_state'] is None:
+                    log_message = (
+                        "Initial state for %s: %s -> %s (SubState: %s)",
+                        service_name.ljust(MAX_SERVICE_NAME_LEN),
+                        (SERVICE_STATES[service_name]['last_state'] if SERVICE_STATES[service_name]['last_state'] else 'None').ljust(MAX_STATE_NAME_LEN),
+                        current_props['ActiveState'].ljust(MAX_STATE_NAME_LEN),
+                        current_props['SubState']
+                    )
+                    LOGGER.info(*log_message)
+                else:
+                    log_message = (
+                        "Initial state for %s: %s (SubState: %s)",
+                        service_name.ljust(MAX_SERVICE_NAME_LEN),
+                        current_props['ActiveState'].ljust(MAX_STATE_NAME_LEN),
+                        current_props['SubState']
+                    )
+                    LOGGER.info(*log_message)
+
+                SERVICE_STATES[service_name]['last_state'] = current_props['ActiveState']
+                SERVICE_STATES[service_name]['last_change_time'] = \
+                    time.strftime('%Y-%m-%d %H:%M:%S',
+                                  time.localtime(current_props['StateChangeTimestamp'] / 1000000))
+                SERVICE_STATES[service_name]['logged_unloaded'] = False
+
+            else:
+                if not SERVICE_STATES[service_name].get('logged_unloaded', False):
+                    LOGGER.warning(
+                        "Service %s not loaded or accessible at startup. "
+                        "Marking as 'unloaded'.",
+                        service_name.ljust(MAX_SERVICE_NAME_LEN)
+                    )
+                    SERVICE_STATES[service_name]['logged_unloaded'] = True
+                SERVICE_STATES[service_name]['last_state'] = 'unloaded'
+
+        for service_name in MONITORED_SERVICES:
             try:
-                unit_obj = self.bus.get_object('org.freedesktop.systemd1', unit_path)
+                unit_path = MANAGER_INTERFACE.GetUnit(service_name)
+                unit_obj = SYSTEM_BUS.get_object(SYSTEMD_DBUS_SERVICE, str(unit_path))
                 unit_obj.connect_to_signal(
                     'PropertiesChanged',
-                    lambda i, c, inv: self._unit_properties_changed(i, c, inv, unit_path),
-                    dbus_interface='org.freedesktop.DBus.Properties'
+                    lambda interface, changed, invalidated, s=service_name:
+                        handle_properties_changed(s, interface, changed, invalidated),
+                    dbus_interface=SYSTEMD_PROPERTIES_INTERFACE
                 )
-                self.registered_units.add(unit_name)
-                self.unit_path_to_name[unit_path] = unit_name
-                if self.debug:
-                    self.logger.debug(f"Subscribed to new unit: {unit_name} (attempt {attempt}, unit_path: {unit_path})")
-                self._poll_unit_state(unit_name, unit_path)
-            except dbus.exceptions.DBusException as e:
-                self.logger.error(f"Failed to subscribe to new unit {unit_name} (attempt {attempt}): {e}")
-                if attempt < 3:  # Retry up to 3 times
-                    GLib.timeout_add(1000, lambda: self._unit_new(unit_name, unit_path))
+                LOGGER.info("Subscribed to PropertiesChanged for %s", service_name.ljust(MAX_SERVICE_NAME_LEN))
+            except dbus.exceptions.DBusException as exc:
+                LOGGER.warning(
+                    "Could not subscribe to %s: %s",
+                    service_name.ljust(MAX_SERVICE_NAME_LEN),
+                    exc
+                )
 
-    def _job_new(self, job_id, job_obj, unit_name):
-        """
-        Handle JobNew signal to detect jobs (e.g., start, stop, restart).
+    except dbus.exceptions.DBusException as exc:
+        LOGGER.error(
+            "Failed to set up D-Bus monitoring: %s",
+            exc
+        )
+        return True
+    return False
 
-        Args:
-            job_id: Job identifier.
-            job_obj: D-Bus object for the job.
-            unit_name (str): Name of the unit.
-        """
-        if self.debug:
-            self.logger.debug(f"JobNew: {unit_name}, JobID: {job_id}")
-        if unit_name in MONITORED_SERVICES:
-            service_name = unit_name.replace('.service', '').replace('.mount', '')
-            self._log_event(service_name, 'pending', 'job', job_type='unknown', source='JobNew')
-            if self.debug:
-                self.logger.debug(f"Logged JobNew for {service_name}")
-
-    def _job_removed(self, job_id, job_obj, unit_name, result):
-        """
-        Handle JobRemoved signal to detect job outcomes (e.g., failed, done).
-
-        Args:
-            job_id: Job identifier.
-            job_obj: D-Bus object for the job.
-            unit_name (str): Name of the unit.
-            result (str): Result of the job.
-        """
-        if self.debug:
-            self.logger.debug(f"JobRemoved: {unit_name}, JobID: {job_id}, Result: {result}")
-        if unit_name in MONITORED_SERVICES:
-            service_name = unit_name.replace('.service', '').replace('.mount', '')
-            if result == 'failed':
-                self.unit_states[service_name] = 'failed'
-                self._log_event(service_name, 'failed', 'job', job_type='failed', source='JobRemoved')
-            elif result == 'done':
-                if self.unit_last_job.get(service_name) == 'start':
-                    self.unit_states[service_name] = 'active'
-                    self._log_event(service_name, 'completed', 'job', job_type='start', source='JobRemoved')
-                elif self.unit_last_job.get(service_name) == 'stop':
-                    self.unit_states[service_name] = 'inactive'
-                    self._log_event(service_name, 'completed', 'job', job_type='stop', source='JobRemoved')
-
-    def _poll_unit_state(self, unit_name, unit_path, retry_count=0):
-        """
-        Poll the state of a single unit with retry logic.
-
-        Args:
-            unit_name (str): Name of the unit.
-            unit_path (str): D-Bus object path for the unit.
-            retry_count (int): Number of retries so far.
-        """
-        max_retries = 3
-        try:
-            unit_obj = self.bus.get_object('org.freedesktop.systemd1', unit_path)
-            props = dbus.Interface(unit_obj, 'org.freedesktop.DBus.Properties')
-            active_state = props.Get('org.freedesktop.systemd1.Unit', 'ActiveState')
-            sub_state = props.Get('org.freedesktop.systemd1.Unit', 'SubState')
-            service_name = unit_name.replace('.service', '').replace('.mount', '')
-            last_state = self.unit_states.get(service_name)
-            if last_state != active_state:
-                self.unit_states[service_name] = active_state
-                self._log_event(service_name, active_state, sub_state, source='Poll')
-            if self.debug:
-                self.logger.debug(f"Polled {service_name}: ActiveState={active_state}, SubState={sub_state}")
-        except dbus.exceptions.DBusException as e:
-            if retry_count < max_retries:
-                if self.debug:
-                    self.logger.debug(f"Retrying poll for {unit_name} (attempt {retry_count + 1}/{max_retries}): {e}")
-                time.sleep(0.1)
-                self._poll_unit_state(unit_name, unit_path, retry_count + 1)
-            else:
-                self.logger.error(f"Failed to poll unit {unit_name} after {max_retries} retries: {e}")
-
-    def _poll_units(self):
-        """
-        Periodically poll the state of registered units.
-
-        Returns:
-            bool: True if polling should continue, False otherwise.
-        """
-        if self.debug:
-            self.logger.debug("Polling registered units")
-        for unit_name in self.registered_units:
-            try:
-                unit_path = self.manager.GetUnit(unit_name)
-                self._poll_unit_state(unit_name, unit_path)
-            except dbus.exceptions.DBusException as e:
-                self.logger.error(f"Failed to get unit path for {unit_name}: {e}")
-        if self.running:
-            return True
-        return False
-
-    def start(self):
-        """
-        Start monitoring specified systemd services via D-Bus.
-        """
-        if self.debug:
-            self.logger.debug("Starting DBusMonitor")
-        DBusGMainLoop(set_as_default=True)
-        try:
-            self.bus = dbus.SystemBus()
-        except dbus.exceptions.DBusException as e:
-            self.logger.error(f"Failed to connect to system bus: {e}")
-            return
-
-        try:
-            systemd = self.bus.get_object('org.freedesktop.systemd1', '/org/freedesktop/systemd1')
-            self.manager = dbus.Interface(systemd, 'org.freedesktop.systemd1.Manager')
-        except dbus.exceptions.DBusException as e:
-            self.logger.error(f"Failed to connect to systemd D-Bus: {e}")
-            return
-
-        try:
-            self.manager.Subscribe()
-            self.bus.add_signal_receiver(
-                self._unit_new,
-                signal_name='UnitNew',
-                dbus_interface='org.freedesktop.systemd1.Manager'
-            )
-            self.bus.add_signal_receiver(
-                self._job_new,
-                signal_name='JobNew',
-                dbus_interface='org.freedesktop.systemd1.Manager'
-            )
-            self.bus.add_signal_receiver(
-                self._job_removed,
-                signal_name='JobRemoved',
-                dbus_interface='org.freedesktop.systemd1.Manager'
-            )
-            if self.debug:
-                self.logger.debug("Subscribed to systemd manager signals")
-        except dbus.exceptions.DBusException as e:
-            self.logger.error(f"Failed to subscribe to manager signals: {e}")
-            return
-
-        try:
-            for unit in self.manager.ListUnits():
-                unit_name = unit[0]
-                if unit_name in MONITORED_SERVICES:
-                    try:
-                        unit_path = self.manager.GetUnit(unit_name)
-                        unit_obj = self.bus.get_object('org.freedesktop.systemd1', unit_path)
-                        unit_obj.connect_to_signal(
-                            'PropertiesChanged',
-                            lambda i, c, inv: self._unit_properties_changed(i, c, inv, unit_path),
-                            dbus_interface='org.freedesktop.DBus.Properties'
-                        )
-                        self.registered_units.add(unit_name)
-                        self.unit_path_to_name[unit_path] = unit_name
-                        if self.debug:
-                            self.logger.debug(f"Subscribed to unit: {unit_name} (unit_path: {unit_path})")
-                        self._poll_unit_state(unit_name, unit_path)
-                    except dbus.exceptions.DBusException as e:
-                        self.logger.error(f"Failed to subscribe to unit {unit_name}: {e}")
-                        if self.subscription_attempts.get(unit_name, 0) < 3:
-                            GLib.timeout_add(1000, lambda: self._unit_new(unit_name, unit_path))
-        except dbus.exceptions.DBusException as e:
-            self.logger.error(f"Failed to list units: {e}")
-
-        self._list_registered_units()
-
-        GLib.timeout_add(100, self._poll_units)  # Poll every 100ms for faster state capture
-
-        self.loop = GLib.MainLoop()
-        self.running = True
-        try:
-            self.loop.run()
-        except KeyboardInterrupt:
-            self.stop()
-        except Exception as e:
-            self.logger.error(f"Main loop error: {e}")
-        finally:
-            self.running = False
-
-    def stop(self):
-        """
-        Stop the D-Bus monitoring loop.
-        """
-        if self.debug:
-            self.logger.debug("Stopping DBusMonitor")
-        if self.running and self.loop:
-            self.loop.quit()
-            self.running = False
-
-class StatsAnalyzer:
+def _get_initial_service_properties(service_name):
     """
-    Analyze logs and generate statistics for systemd service events.
-
-    Attributes:
-        log_files (list): List of log file paths.
-        logger: Logger instance.
-        debug (bool): Enable debug logging.
+    Helper to fetch initial properties for a service.
     """
-    def __init__(self, log_files, debug=False):
-        """
-        Initialize the StatsAnalyzer.
+    try:
+        unit_path = MANAGER_INTERFACE.GetUnit(service_name)
+        unit_obj = SYSTEM_BUS.get_object(SYSTEMD_DBUS_SERVICE, str(unit_path))
+        unit_props = dbus.Interface(unit_obj, SYSTEMD_PROPERTIES_INTERFACE)
 
-        Args:
-            log_files (list or str): Log file(s) to analyze.
-            debug (bool): Enable debug logging.
-        """
-        self.log_files = log_files if isinstance(log_files, list) else [log_files]
-        self.logger = logging.getLogger('SystemdMonitor')
-        self.debug = debug
+        active_state = unit_props.Get(SYSTEMD_UNIT_INTERFACE, 'ActiveState')
+        sub_state = unit_props.Get(SYSTEMD_UNIT_INTERFACE, 'SubState')
+        exec_main_status = unit_props.Get(SYSTEMD_SERVICE_INTERFACE, 'ExecMainStatus')
+        exec_main_code = unit_props.Get(SYSTEMD_SERVICE_INTERFACE, 'ExecMainCode')
+        state_change_timestamp = unit_props.Get(SYSTEMD_UNIT_INTERFACE, 'StateChangeTimestamp')
 
-    def _parse_logs(self, log_file):
-        """
-        Parse log file and extract service events.
+        return {
+            'ActiveState': str(active_state),
+            'SubState': str(sub_state),
+            'ExecMainStatus': int(exec_main_status),
+            'ExecMainCode': int(exec_main_code),
+            'StateChangeTimestamp': int(state_change_timestamp)
+        }
+    except dbus.exceptions.DBusException:
+        return None
 
-        Args:
-            log_file (str): Path to the log file.
 
-        Returns:
-            dict: Mapping of service names to lists of event dicts.
-        """
-        events = defaultdict(list)
-        try:
-            with open(log_file, 'r') as f:
-                for line in f:
-                    # Skip debug lines to prevent recursive logging
-                    if 'DEBUG -' in line:
-                        continue
-                    match = re.match(
-                        r'(\S+\s+\S+\s+\S+).*?Service:\s*([^,]+),\s*State:\s*([^,]+),\s*SubState:\s*([^,]+)(?:,\s*Source:\s*(\S+))?(?:,\s*Job:\s*(.+))?',
-                        line
-                    )
-                    if match:
-                        timestamp, service, state, substate, source, job_type = match.groups()
-                        if not service or service == '-' or not re.match(r'^[a-zA-Z0-9@._-]+\.?(?:service|mount)?$', service):
-                            if self.debug:
-                                self.logger.debug(f"Skipping invalid service in logs: {service}")
-                            continue
-                        unescaped_service = unescape_unit_name(service.strip())
-                        if unescaped_service not in MONITORED_SERVICES:
-                            if self.debug:
-                                self.logger.debug(f"Skipping non-monitored service in logs: {service} (unescaped: {unescaped_service})")
-                            continue
-                        events[unescaped_service].append({
-                            'timestamp': timestamp,
-                            'state': state.strip(),
-                            'substate': substate.strip(),
-                            'job_type': job_type.strip() if job_type else None,
-                            'source': source.strip() if source else None
-                        })
-                    elif self.debug and not line.startswith('202'):
-                        self.logger.debug(f"Line did not match regex (non-timestamped): {line.strip()}")
-        except FileNotFoundError:
-            print(f"Log file {log_file} not found.")
-            self.logger.error(f"Log file {log_file} not found")
-        except Exception as e:
-            self.logger.error(f"Error parsing log file {log_file}: {e}")
-        return events
-
-    def generate_statistics(self):
-        """
-        Generate and print statistics from log files.
-        """
-        if self.debug:
-            self.logger.debug("Generating statistics")
-        for log_file in self.log_files:
-            events = self._parse_logs(log_file)
-            stats = defaultdict(lambda: {'crashes': 0, 'restarts': 0, 'starts': 0, 'stops': 0})
-            last_state = {}
-
-            for service, event_list in events.items():
-                for event in event_list:
-                    state = event['state']
-                    substate = event['substate']
-                    job_type = event['job_type']
-
-                    # Only count valid state transitions
-                    if state == 'unknown':
-                        continue  # Skip unknown states unless failure-related
-                    elif state == 'active':
-                        stats[service]['starts'] += 1
-                    elif state == 'inactive':
-                        stats[service]['stops'] += 1
-                    elif state == 'failed':
-                        stats[service]['crashes'] += 1
-                        stats[service]['restarts'] += 1
-                    elif state == 'activating':
-                        stats[service]['starts'] += 1
-                    elif state == 'deactivating':
-                        stats[service]['stops'] += 1
-                    elif state == 'pending' and job_type in ['start', 'restart', 'unknown']:
-                        stats[service]['starts'] += 1
-                    elif state == 'pending' and job_type == 'stop':
-                        stats[service]['stops'] += 1
-                    elif state == 'completed' and job_type == 'start':
-                        stats[service]['starts'] += 1
-                    elif state == 'completed' and job_type == 'stop':
-                        stats[service]['stops'] += 1
-
-                    last_state[service] = state
-
-            print(f"\nStatistics from {log_file}:")
-            if not stats:
-                print("No events found.")
-                self.logger.info("No events found in statistics generation")
-                continue
-            headers = ["Service", "Crashes", "Restarts", "Starts", "Stops"]
-            max_service_len = max(len(service) for service in stats.keys())
-            print(f"{headers[0]:<{max_service_len}} {headers[1]:<10} {headers[2]:<10} {headers[3]:<10} {headers[4]:<10}")
-            print("-" * (max_service_len + 40))
-            for service, counts in sorted(stats.items()):
-                print(f"{service:<{max_service_len}} {counts['crashes']:<10} {counts['restarts']:<10} {counts['starts']:<10} {counts['stops']:<10}")
-            self.logger.info(f"Generated statistics for {log_file}")
-
-class SystemdMonitor:
+def signal_handler(_sig, _frame, main_loop):
     """
-    Orchestrate D-Bus monitoring with statistics.
-
-    Attributes:
-        dbus_monitor (DBusMonitor): The D-Bus monitor instance.
-        stats_analyzer (StatsAnalyzer): The statistics analyzer instance.
-        dbus_thread (threading.Thread): Thread for D-Bus monitoring.
-        stats_thread (threading.Thread): Thread for statistics generation.
-        running (bool): Whether the monitor is running.
-        stats_running (bool): Whether statistics generation is running.
+    Handle termination signals with cleanup. Saves state before exiting.
     """
-    def __init__(self, dbus_log='systemd_monitor.log', debug=False):
-        """
-        Initialize the SystemdMonitor.
+    print("\nTerminating gracefully...")
+    # Save state before quitting
+    save_state()
+    try:
+        MANAGER_INTERFACE.Unsubscribe() # Unsubscribe from global systemd signals
+        LOGGER.info("Successfully unsubscribed from systemd D-Bus signals.")
+    except dbus.exceptions.DBusException as exc:
+        LOGGER.warning("Failed to unsubscribe from D-Bus: %s", exc)
+    try:
+        SYSTEM_BUS.close()
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        LOGGER.error("Failed to close D-Bus connection: %s", exc)
 
-        Args:
-            dbus_log (str): Path to the D-Bus log file.
-            debug (bool): Enable debug logging.
-        """
-        self.dbus_monitor = DBusMonitor(dbus_log, debug)
-        self.stats_analyzer = StatsAnalyzer([dbus_log], debug)
-        self.dbus_thread = None
-        self.stats_thread = None
-        self.running = False
-        self.stats_running = False
+    # Ensure logs are flushed before exiting
+    for handler in LOGGER.handlers:
+        handler.flush()
 
-    def start(self):
-        """
-        Start D-Bus monitoring and stats generation in separate threads.
-        """
-        self.running = True
-        self.stats_running = True
-        self.dbus_thread = threading.Thread(target=self.dbus_monitor.start)
-        self.dbus_thread.start()
-        self.stats_thread = threading.Thread(target=self._stats_loop)
-        self.stats_thread.start()
-
-    def _stats_loop(self):
-        """
-        Run periodic statistics generation.
-        """
-        logger = logging.getLogger('SystemdMonitor')
-        if self.dbus_monitor.debug:
-            logger.debug("Starting stats loop")
-        while self.stats_running:
-            try:
-                self.stats_analyzer.generate_statistics()
-                threading.Event().wait(60)
-            except Exception as e:
-                logger.error(f"Stats loop error: {e}")
-                break
-        if self.dbus_monitor.debug:
-            logger.debug("Stats loop stopped")
-
-    def stop(self):
-        """
-        Stop the monitor and stats threads.
-        """
-        logger = logging.getLogger('SystemdMonitor')
-        if self.dbus_monitor.debug:
-            logger.debug("Stopping SystemdMonitor")
-        if self.running:
-            self.stats_running = False
-            self.dbus_monitor.stop()
-            if self.dbus_thread:
-                self.dbus_thread.join(timeout=2.0)
-            if self.stats_thread:
-                self.stats_thread.join(timeout=2.0)
-            self.running = False
-
-    def generate_stats(self):
-        """
-        Generate statistics from logs.
-        """
-        self.stats_analyzer.generate_statistics()
-
-def signal_handler(sig, frame):
-    """
-    Handle SIGINT (Ctrl+C) during runtime.
-
-    Args:
-        sig: Signal number.
-        frame: Current stack frame.
-    """
-    print("\nShutting down...")
-    monitor.stop()
-    monitor.generate_stats()
+    main_loop.quit()
     sys.exit(0)
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Systemd Service Monitor')
-    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
-    args = parser.parse_args()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description='Monitor systemd services.',
+        add_help=False
+    )
+    parser.add_argument('-h', '--help', action='store_true', help='Show help message and monitored services')
+    parser.add_argument('-v', '--version', action='store_true', help='Show module version')
+    parser.add_argument('-c', '--clear', action='store_true', help='Clear history log and persistence file')
+    parser.add_argument('-l', '--log-file', default=DEFAULT_LOG_FILE, help='Path to the monitoring log file')
+    parser.add_argument('-p', '--persistence-file', default=os.path.join(PERSISTENCE_DIR, PERSISTENCE_FILENAME), help='Path to the persistence file')
+    ARGS = parser.parse_args()
 
-    log_file = 'systemd_monitor.log'
-    try:
-        with open(log_file, 'a') as f:
-            os.chmod(log_file, 0o666)
-    except Exception as e:
-        print(f"Failed to set permissions for {log_file}: {e}")
+    # If log file path is different from default, update handler
+    if ARGS.log_file != DEFAULT_LOG_FILE:
+        LOGGER.removeHandler(FILE_HANDLER)
+        FILE_HANDLER = RotatingFileHandler(ARGS.log_file, maxBytes=1 * 1024 * 1024, backupCount=3)
+        FILE_HANDLER.setLevel(logging.INFO)
+        FILE_HANDLER.setFormatter(FORMATTER)
+        LOGGER.addHandler(FILE_HANDLER)
+
+    # Update global persistence file path
+    globals()['PERSISTENCE_FILE'] = ARGS.persistence_file
+
+    if ARGS.help:
+        print("\nService Monitor for systemd units\n")
+        print("Monitored services:")
+        for svc in MONITORED_SERVICES:
+            print(f"  - {svc}")
+        print(f"\nMonitoring results are logged to: {ARGS.log_file}")
+        print(f"Persistence file is located at: {ARGS.persistence_file}")
+        print("\nUsage:")
+        print("  -h, --help     Show this help message and monitored services")
+        print("  -v, --version  Show module version")
+        print("  -c, --clear    Clear history log and persistence file")
+        print("  -l, --log-file     Path to the monitoring log file")
+        print("  -p, --persistence-file Path to the persistence file")
+        sys.exit(0)
+
+    if ARGS.version:
+        print(f"systemd.monitor version: {__git_tag__}")
+        sys.exit(0)
+
+    if ARGS.clear:
+        # Remove log file and persistence file if they exist
+        if os.path.exists(ARGS.log_file):
+            os.remove(ARGS.log_file)
+            print(f"Removed log file: {ARGS.log_file}")
+        if os.path.exists(ARGS.persistence_file):
+            os.remove(ARGS.persistence_file)
+            print(f"Removed persistence file: {ARGS.persistence_file}")
+        sys.exit(0)
+
+    MAIN_LOOP = GLib.MainLoop()
+
+    # Set up signal handlers with reference to the GLib loop
+    # Using partial from functools for consistent signal handler binding
+    signal.signal(signal.SIGINT, partial(signal_handler, main_loop=MAIN_LOOP))
+    signal.signal(signal.SIGTERM, partial(signal_handler, main_loop=MAIN_LOOP))
+
+    if setup_dbus_monitor():
+        LOGGER.error("D-Bus monitoring setup failed. Exiting.")
         sys.exit(1)
 
-    monitor = SystemdMonitor(debug=args.debug)
-    signal.signal(signal.SIGINT, signal_handler)
     try:
-        monitor.start()
-        monitor.dbus_thread.join()
+        MAIN_LOOP.run()
     except KeyboardInterrupt:
-        signal_handler(signal.SIGINT, None)
-    except Exception as e:
-        logging.getLogger('SystemdMonitor').error(f"SystemdMonitor error: {e}")
-    finally:
-        monitor.stop()
+        # KeyboardInterrupt will be caught by the signal handler, but
+        # this provides a fallback for direct execution without signal trapping
+        signal_handler(signal.SIGINT, None, MAIN_LOOP)
