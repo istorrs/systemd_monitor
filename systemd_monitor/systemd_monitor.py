@@ -500,4 +500,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         # KeyboardInterrupt will be caught by the signal handler, but
         # this provides a fallback for direct execution without signal trapping
+
         signal_handler(signal.SIGINT, None, MAIN_LOOP)
