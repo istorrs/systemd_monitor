@@ -1,0 +1,16 @@
+LICENSE
+README.md
+pyproject.toml
+setup.py
+systemd_monitor/__init__.py
+systemd_monitor/config.py
+systemd_monitor/systemd_monitor.py
+systemd_monitor.egg-info/PKG-INFO
+systemd_monitor.egg-info/SOURCES.txt
+systemd_monitor.egg-info/dependency_links.txt
+systemd_monitor.egg-info/entry_points.txt
+systemd_monitor.egg-info/not-zip-safe
+systemd_monitor.egg-info/requires.txt
+systemd_monitor.egg-info/top_level.txt
+tests/__init__.py
+tests/test_systemd_monitor.py
