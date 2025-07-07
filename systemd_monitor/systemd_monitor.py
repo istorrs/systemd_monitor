@@ -43,8 +43,30 @@ def unescape_unit_name(escaped_name):
     return name
 
 class DBusMonitor:
-    """Monitor specific systemd service state changes via D-Bus signals and polling."""
+    """
+    Monitor specific systemd service state changes via D-Bus signals and polling.
+
+    Attributes:
+        log_file (str): Path to the log file.
+        debug (bool): Enable debug logging.
+        loop: Main event loop.
+        running (bool): Whether the monitor is running.
+        bus: D-Bus system bus connection.
+        manager: D-Bus systemd manager interface.
+        registered_units (set): Set of registered unit names.
+        unit_states (dict): Last known ActiveState for each unit.
+        unit_last_job (dict): Last job type for failed states.
+        subscription_attempts (dict): Subscription attempts per unit.
+        unit_path_to_name (dict): Map from unit path to service name.
+    """
     def __init__(self, log_file='systemd_monitor.log', debug=False):
+        """
+        Initialize the DBusMonitor.
+
+        Args:
+            log_file (str): Path to the log file.
+            debug (bool): Enable debug logging.
+        """
         self.log_file = log_file
         self.debug = debug
         self._setup_logging()
@@ -59,7 +81,9 @@ class DBusMonitor:
         self.unit_path_to_name = {}  # Map unit_path to service_name
 
     def _setup_logging(self):
-        """Configure logging for D-Bus events."""
+        """
+        Configure logging for D-Bus events.
+        """
         self.logger = logging.getLogger('SystemdMonitor')
         self.logger.setLevel(logging.DEBUG if self.debug else logging.INFO)
         self.logger.handlers = []
@@ -73,7 +97,16 @@ class DBusMonitor:
             self.logger.debug("Logging initialized for SystemdMonitor")
 
     def _log_event(self, service, state, substate, job_type=None, source='signal'):
-        """Log service state change events."""
+        """
+        Log service state change events.
+
+        Args:
+            service (str): Service name.
+            state (str): New state.
+            substate (str): Substate.
+            job_type (str, optional): Job type if applicable.
+            source (str): Source of the event.
+        """
         if not service or service == '-' or not re.match(r'^[a-zA-Z0-9@._-]+\.?(?:service|mount)?$', service):
             if self.debug:
                 self.logger.debug(f"Ignoring invalid service name: {service}")
@@ -93,7 +126,9 @@ class DBusMonitor:
             self.logger.debug(f"Logged event: {message}")
 
     def _list_registered_units(self):
-        """List all units registered for monitoring."""
+        """
+        List all units registered for monitoring.
+        """
         if not self.registered_units:
             message = "No units registered for monitoring."
         else:
@@ -102,7 +137,15 @@ class DBusMonitor:
         print(message)
 
     def _get_unit_name_from_path(self, unit_path):
-        """Query the unit name directly from D-Bus using the unit path."""
+        """
+        Query the unit name directly from D-Bus using the unit path.
+
+        Args:
+            unit_path (str): D-Bus object path for the unit.
+
+        Returns:
+            str or None: The unit name, or None if not found.
+        """
         try:
             unit_obj = self.bus.get_object('org.freedesktop.systemd1', unit_path)
             props = dbus.Interface(unit_obj, 'org.freedesktop.DBus.Properties')
@@ -114,7 +157,15 @@ class DBusMonitor:
             return None
 
     def _unit_properties_changed(self, interface, changed, invalidated, unit_path):
-        """Handle PropertiesChanged signal for systemd units."""
+        """
+        Handle PropertiesChanged signal for systemd units.
+
+        Args:
+            interface (str): D-Bus interface name.
+            changed (dict): Changed properties.
+            invalidated (list): Invalidated properties.
+            unit_path (str): D-Bus object path for the unit.
+        """
         self.logger.info(f"PropertiesChanged for unit_path {unit_path}: {changed}, invalidated={invalidated}")
         service_name = self.unit_path_to_name.get(unit_path)
         raw_service_name = unit_path.split('/')[-1]
@@ -140,7 +191,13 @@ class DBusMonitor:
             self.logger.debug(f"Skipping non-state PropertiesChanged for {service_name}: {changed}")
 
     def _unit_new(self, unit_name, unit_path):
-        """Handle UnitNew signal to monitor new units."""
+        """
+        Handle UnitNew signal to monitor new units.
+
+        Args:
+            unit_name (str): Name of the new unit.
+            unit_path (str): D-Bus object path for the unit.
+        """
         if self.debug:
             self.logger.debug(f"UnitNew: {unit_name}, Path: {unit_path}")
         if unit_name in MONITORED_SERVICES:
@@ -164,7 +221,14 @@ class DBusMonitor:
                     GLib.timeout_add(1000, lambda: self._unit_new(unit_name, unit_path))
 
     def _job_new(self, job_id, job_obj, unit_name):
-        """Handle JobNew signal to detect jobs (e.g., start, stop, restart)."""
+        """
+        Handle JobNew signal to detect jobs (e.g., start, stop, restart).
+
+        Args:
+            job_id: Job identifier.
+            job_obj: D-Bus object for the job.
+            unit_name (str): Name of the unit.
+        """
         if self.debug:
             self.logger.debug(f"JobNew: {unit_name}, JobID: {job_id}")
         if unit_name in MONITORED_SERVICES:
@@ -174,7 +238,15 @@ class DBusMonitor:
                 self.logger.debug(f"Logged JobNew for {service_name}")
 
     def _job_removed(self, job_id, job_obj, unit_name, result):
-        """Handle JobRemoved signal to detect job outcomes (e.g., failed, done)."""
+        """
+        Handle JobRemoved signal to detect job outcomes (e.g., failed, done).
+
+        Args:
+            job_id: Job identifier.
+            job_obj: D-Bus object for the job.
+            unit_name (str): Name of the unit.
+            result (str): Result of the job.
+        """
         if self.debug:
             self.logger.debug(f"JobRemoved: {unit_name}, JobID: {job_id}, Result: {result}")
         if unit_name in MONITORED_SERVICES:
@@ -191,7 +263,14 @@ class DBusMonitor:
                     self._log_event(service_name, 'completed', 'job', job_type='stop', source='JobRemoved')
 
     def _poll_unit_state(self, unit_name, unit_path, retry_count=0):
-        """Poll the state of a single unit with retry logic."""
+        """
+        Poll the state of a single unit with retry logic.
+
+        Args:
+            unit_name (str): Name of the unit.
+            unit_path (str): D-Bus object path for the unit.
+            retry_count (int): Number of retries so far.
+        """
         max_retries = 3
         try:
             unit_obj = self.bus.get_object('org.freedesktop.systemd1', unit_path)
@@ -215,7 +294,12 @@ class DBusMonitor:
                 self.logger.error(f"Failed to poll unit {unit_name} after {max_retries} retries: {e}")
 
     def _poll_units(self):
-        """Periodically poll the state of registered units."""
+        """
+        Periodically poll the state of registered units.
+
+        Returns:
+            bool: True if polling should continue, False otherwise.
+        """
         if self.debug:
             self.logger.debug("Polling registered units")
         for unit_name in self.registered_units:
@@ -229,7 +313,9 @@ class DBusMonitor:
         return False
 
     def start(self):
-        """Start monitoring specified systemd services via D-Bus."""
+        """
+        Start monitoring specified systemd services via D-Bus.
+        """
         if self.debug:
             self.logger.debug("Starting DBusMonitor")
         DBusGMainLoop(set_as_default=True)
@@ -309,7 +395,9 @@ class DBusMonitor:
             self.running = False
 
     def stop(self):
-        """Stop the D-Bus monitoring loop."""
+        """
+        Stop the D-Bus monitoring loop.
+        """
         if self.debug:
             self.logger.debug("Stopping DBusMonitor")
         if self.running and self.loop:
@@ -317,14 +405,36 @@ class DBusMonitor:
             self.running = False
 
 class StatsAnalyzer:
-    """Analyze logs and generate statistics for systemd service events."""
+    """
+    Analyze logs and generate statistics for systemd service events.
+
+    Attributes:
+        log_files (list): List of log file paths.
+        logger: Logger instance.
+        debug (bool): Enable debug logging.
+    """
     def __init__(self, log_files, debug=False):
+        """
+        Initialize the StatsAnalyzer.
+
+        Args:
+            log_files (list or str): Log file(s) to analyze.
+            debug (bool): Enable debug logging.
+        """
         self.log_files = log_files if isinstance(log_files, list) else [log_files]
         self.logger = logging.getLogger('SystemdMonitor')
         self.debug = debug
 
     def _parse_logs(self, log_file):
-        """Parse log file and extract service events."""
+        """
+        Parse log file and extract service events.
+
+        Args:
+            log_file (str): Path to the log file.
+
+        Returns:
+            dict: Mapping of service names to lists of event dicts.
+        """
         events = defaultdict(list)
         try:
             with open(log_file, 'r') as f:
@@ -364,7 +474,9 @@ class StatsAnalyzer:
         return events
 
     def generate_statistics(self):
-        """Generate and print statistics from log files."""
+        """
+        Generate and print statistics from log files.
+        """
         if self.debug:
             self.logger.debug("Generating statistics")
         for log_file in self.log_files:
@@ -417,8 +529,25 @@ class StatsAnalyzer:
             self.logger.info(f"Generated statistics for {log_file}")
 
 class SystemdMonitor:
-    """Orchestrate D-Bus monitoring with statistics."""
+    """
+    Orchestrate D-Bus monitoring with statistics.
+
+    Attributes:
+        dbus_monitor (DBusMonitor): The D-Bus monitor instance.
+        stats_analyzer (StatsAnalyzer): The statistics analyzer instance.
+        dbus_thread (threading.Thread): Thread for D-Bus monitoring.
+        stats_thread (threading.Thread): Thread for statistics generation.
+        running (bool): Whether the monitor is running.
+        stats_running (bool): Whether statistics generation is running.
+    """
     def __init__(self, dbus_log='systemd_monitor.log', debug=False):
+        """
+        Initialize the SystemdMonitor.
+
+        Args:
+            dbus_log (str): Path to the D-Bus log file.
+            debug (bool): Enable debug logging.
+        """
         self.dbus_monitor = DBusMonitor(dbus_log, debug)
         self.stats_analyzer = StatsAnalyzer([dbus_log], debug)
         self.dbus_thread = None
@@ -427,7 +556,9 @@ class SystemdMonitor:
         self.stats_running = False
 
     def start(self):
-        """Start D-Bus monitoring and stats generation in separate threads."""
+        """
+        Start D-Bus monitoring and stats generation in separate threads.
+        """
         self.running = True
         self.stats_running = True
         self.dbus_thread = threading.Thread(target=self.dbus_monitor.start)
@@ -436,7 +567,9 @@ class SystemdMonitor:
         self.stats_thread.start()
 
     def _stats_loop(self):
-        """Run periodic statistics generation."""
+        """
+        Run periodic statistics generation.
+        """
         logger = logging.getLogger('SystemdMonitor')
         if self.dbus_monitor.debug:
             logger.debug("Starting stats loop")
@@ -451,7 +584,9 @@ class SystemdMonitor:
             logger.debug("Stats loop stopped")
 
     def stop(self):
-        """Stop the monitor and stats threads."""
+        """
+        Stop the monitor and stats threads.
+        """
         logger = logging.getLogger('SystemdMonitor')
         if self.dbus_monitor.debug:
             logger.debug("Stopping SystemdMonitor")
@@ -465,11 +600,19 @@ class SystemdMonitor:
             self.running = False
 
     def generate_stats(self):
-        """Generate statistics from logs."""
+        """
+        Generate statistics from logs.
+        """
         self.stats_analyzer.generate_statistics()
 
 def signal_handler(sig, frame):
-    """Handle SIGINT (Ctrl+C) during runtime."""
+    """
+    Handle SIGINT (Ctrl+C) during runtime.
+
+    Args:
+        sig: Signal number.
+        frame: Current stack frame.
+    """
     print("\nShutting down...")
     monitor.stop()
     monitor.generate_stats()
