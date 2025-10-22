@@ -9,8 +9,22 @@ import signal
 from unittest.mock import patch, MagicMock, mock_open
 import pytest
 
-# Import the module under test
-from systemd_monitor import systemd_monitor
+# Check if dbus is available
+try:
+    import dbus as _dbus_check  # pylint: disable=unused-import
+    DBUS_AVAILABLE = True
+    # Only import if dbus is available
+    from systemd_monitor import systemd_monitor  # pylint: disable=wrong-import-position
+except (ImportError, ModuleNotFoundError):
+    DBUS_AVAILABLE = False
+    # Create a dummy module object to prevent NameError in test definitions
+    systemd_monitor = None  # pylint: disable=invalid-name
+
+# Skip all tests if dbus is not available
+pytestmark = pytest.mark.skipif(
+    not DBUS_AVAILABLE,
+    reason="dbus-python not available in this environment"
+)
 
 
 class TestStateFunctions:
@@ -281,10 +295,10 @@ class TestSetupDBusMonitor:
 
     def test_setup_handles_dbus_exception(self):
         """Test that setup_dbus_monitor handles D-Bus exceptions."""
-        import dbus
+        import dbus as dbus_module  # Import locally to avoid name conflict
         with patch('systemd_monitor.systemd_monitor.load_state'), \
              patch.object(systemd_monitor.MANAGER_INTERFACE, 'Subscribe',
-                         side_effect=dbus.exceptions.DBusException("Connection failed")), \
+                         side_effect=dbus_module.exceptions.DBusException("Connection failed")), \
              patch.object(systemd_monitor.LOGGER, 'error') as mock_error:
             result = systemd_monitor.setup_dbus_monitor()
             assert result is True  # True means error occurred
@@ -324,9 +338,9 @@ class TestGetInitialServiceProperties:
 
     def test_get_properties_handles_exception(self):
         """Test that _get_initial_service_properties handles exceptions."""
-        import dbus
+        import dbus as dbus_module  # Import locally to avoid name conflict
         with patch.object(systemd_monitor.MANAGER_INTERFACE, 'GetUnit',
-                         side_effect=dbus.exceptions.DBusException("Unit not found")):
+                         side_effect=dbus_module.exceptions.DBusException("Unit not found")):
             result = systemd_monitor._get_initial_service_properties('test.service')
             assert result is None
 
@@ -359,12 +373,12 @@ class TestSignalHandler:
 
     def test_signal_handler_handles_unsub_error(self):
         """Test that signal handler handles unsubscribe errors gracefully."""
-        import dbus
+        import dbus as dbus_module  # Import locally to avoid name conflict
         mock_loop = MagicMock()
 
         with patch('systemd_monitor.systemd_monitor.save_state'), \
              patch.object(systemd_monitor.MANAGER_INTERFACE, 'Unsubscribe',
-                         side_effect=dbus.exceptions.DBusException("Error")), \
+                         side_effect=dbus_module.exceptions.DBusException("Error")), \
              patch.object(systemd_monitor.SYSTEM_BUS, 'close'), \
              patch.object(systemd_monitor.LOGGER, 'warning') as mock_warn, \
              patch('sys.exit'):
