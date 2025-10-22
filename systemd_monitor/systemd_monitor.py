@@ -23,35 +23,24 @@ import dbus
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib  # pylint: disable=no-name-in-module
 
+from systemd_monitor.config import Config
+
 __git_tag__ = "manual_version"
 
 # Set up DBusGMainLoop globally before any D-Bus interaction
 DBusGMainLoop(set_as_default=True)
 
-# List of services to monitor
-MONITORED_SERVICES = [
-    'wirepas-gateway.service',
-    'wirepas-sink-ttys1.service',
-    'wirepas-sink-ttys2.service',
-    'edger.connecteddev.service',
-    'edger.endries.service',
-    'devmgmt.service',
-    'hwcheck.service',
-    'provisioning.service',
-    'Node-Configuration.service',
-    'setup_cell_connect.service',
-    'mosquitto.service',
-    'wps_button_monitor.service',
-]
-
-# Path for persistence file
+# Configuration will be loaded from Config module
+# These are module-level variables that will be set by initialize_from_config()
+MONITORED_SERVICES = []  # pylint: disable=invalid-name
 PERSISTENCE_DIR = '/var/lib/service_monitor'
 PERSISTENCE_FILENAME = 'service_states.json'
 PERSISTENCE_FILE = os.path.join(PERSISTENCE_DIR, PERSISTENCE_FILENAME)
 
 # Calculate max service name length for consistent padding
-MAX_SERVICE_NAME_LEN = max(len(s) for s in MONITORED_SERVICES)
-MAX_STATE_NAME_LEN = 12 # "deactivating" is 12 chars, "activating" 10, "inactive" 8
+# Will be set after MONITORED_SERVICES is loaded
+MAX_SERVICE_NAME_LEN = 30  # Default, will be recalculated
+MAX_STATE_NAME_LEN = 12  # "deactivating" is 12 chars, "activating" 10, "inactive" 8
 
 # D-Bus service and object path constants
 SYSTEMD_DBUS_SERVICE = 'org.freedesktop.systemd1'
@@ -425,6 +414,23 @@ def _get_initial_service_properties(service_name):
         return None
 
 
+def initialize_from_config(config: Config):
+    """
+    Initialize module-level variables from Config object.
+    """
+    global MONITORED_SERVICES, MAX_SERVICE_NAME_LEN  # pylint: disable=global-statement
+
+    MONITORED_SERVICES = list(config.monitored_services)
+
+    # Recalculate max service name length
+    if MONITORED_SERVICES:
+        MAX_SERVICE_NAME_LEN = max(len(s) for s in MONITORED_SERVICES)
+    else:
+        MAX_SERVICE_NAME_LEN = 30  # Default if no services
+
+    LOGGER.info("Initialized with %d monitored services", len(MONITORED_SERVICES))
+
+
 def signal_handler(_sig, _frame, main_loop):
     """
     Handle termination signals with cleanup. Saves state before exiting.
@@ -460,39 +466,69 @@ if __name__ == "__main__":
                         help='Show module version')
     parser.add_argument('-c', '--clear', action='store_true',
                         help='Clear history log and persistence file')
-    parser.add_argument('-l', '--log-file', default=DEFAULT_LOG_FILE,
+    parser.add_argument('--config', type=str,
+                        help='Path to JSON configuration file')
+    parser.add_argument('--services', nargs='+',
+                        help='List of services to monitor (overrides config file)')
+    parser.add_argument('-l', '--log-file', default=None,
                         help='Path to the monitoring log file')
-    parser.add_argument('-p', '--persistence-file',
-                        default=os.path.join(PERSISTENCE_DIR, PERSISTENCE_FILENAME),
+    parser.add_argument('-p', '--persistence-file', default=None,
                         help='Path to the persistence file')
+    parser.add_argument('--debug', action='store_true',
+                        help='Enable debug logging')
     ARGS = parser.parse_args()
 
-    # If log file path is different from default, update handler
-    if ARGS.log_file != DEFAULT_LOG_FILE:
+    # Initialize configuration
+    config_kwargs = {}
+    if ARGS.debug:
+        config_kwargs['debug'] = True
+    if ARGS.log_file:
+        config_kwargs['log_file'] = ARGS.log_file
+    if ARGS.services:
+        config_kwargs['monitored_services'] = ARGS.services
+
+    app_config = Config(config_file=ARGS.config, **config_kwargs)
+
+    # Initialize module variables from config
+    initialize_from_config(app_config)
+
+    # Set log file path
+    log_file_path = ARGS.log_file if ARGS.log_file else app_config.log_file
+
+    # Update logging handler if needed
+    if log_file_path != DEFAULT_LOG_FILE:
         LOGGER.removeHandler(file_handler)
         new_file_handler = RotatingFileHandler(
-            ARGS.log_file, maxBytes=1 * 1024 * 1024, backupCount=3
+            log_file_path, maxBytes=1 * 1024 * 1024, backupCount=3
         )
-        new_file_handler.setLevel(logging.INFO)
+        new_file_handler.setLevel(logging.DEBUG if app_config.debug else logging.INFO)
         new_file_handler.setFormatter(FORMATTER)
         LOGGER.addHandler(new_file_handler)
 
+    # Set debug level if requested
+    if app_config.debug:
+        LOGGER.setLevel(logging.DEBUG)
+
     # Update global persistence file path
-    globals()['PERSISTENCE_FILE'] = ARGS.persistence_file
+    if ARGS.persistence_file:
+        globals()['PERSISTENCE_FILE'] = ARGS.persistence_file
 
     if ARGS.help:
         print("\nService Monitor for systemd units\n")
         print("Monitored services:")
         for svc in MONITORED_SERVICES:
             print(f"  - {svc}")
-        print(f"\nMonitoring results are logged to: {ARGS.log_file}")
-        print(f"Persistence file is located at: {ARGS.persistence_file}")
+        print(f"\nMonitoring results are logged to: {log_file_path}")
+        print(f"Persistence file is located at: {PERSISTENCE_FILE}")
         print("\nUsage:")
-        print("  -h, --help     Show this help message and monitored services")
-        print("  -v, --version  Show module version")
-        print("  -c, --clear    Clear history log and persistence file")
-        print("  -l, --log-file     Path to the monitoring log file")
-        print("  -p, --persistence-file Path to the persistence file")
+        print("  -h, --help                Show this help message and monitored services")
+        print("  -v, --version             Show module version")
+        print("  -c, --clear               Clear history log and persistence file")
+        print("  --config FILE             Path to JSON configuration file")
+        print("  --services SERVICE [...]  List of services to monitor")
+        print("  -l, --log-file FILE       Path to the monitoring log file")
+        print("  -p, --persistence-file FILE Path to the persistence file")
+        print("  --debug                   Enable debug logging")
         sys.exit(0)
 
     if ARGS.version:
