@@ -1,3 +1,8 @@
 systemd_monitor.log
 *.pyc
 venv/
+
+# Coverage reports
+.coverage
+htmlcov/
+.pytest_cache/
