@@ -18,6 +18,7 @@ import sys
 import json
 import os
 from functools import partial # Used for signal_handler binding
+from typing import Dict, Any, Optional, List
 
 import dbus
 from dbus.mainloop.glib import DBusGMainLoop
@@ -76,7 +77,7 @@ file_handler.setFormatter(FORMATTER)
 LOGGER.addHandler(file_handler)
 # --- End logging setup ---
 
-def save_state():
+def save_state() -> None:
     """
     Saves the current SERVICE_STATES dictionary to a JSON file for persistence.
     """
@@ -102,7 +103,7 @@ def save_state():
         LOGGER.error("Error serializing service states (check data types): %s", e)
 
 
-def load_state():
+def load_state() -> None:
     """
     Loads service states from a JSON file.
     Initializes missing services or counters to default values.
@@ -154,7 +155,8 @@ def load_state():
                           for service in MONITORED_SERVICES}
 
 
-def handle_properties_changed(service_name, _interface, changed, _invalidated):
+def handle_properties_changed(service_name: str, _interface: str,
+                               changed: Dict[str, Any], _invalidated: List[str]) -> None:
     """
     Handle PropertiesChanged signal to detect service state changes and crashes,
     and update persistent counters.
@@ -297,7 +299,7 @@ def handle_properties_changed(service_name, _interface, changed, _invalidated):
         save_state()
 
 
-def setup_dbus_monitor():
+def setup_dbus_monitor() -> bool:
     """
     Set up D-Bus signal monitoring for service state changes.
 
@@ -388,7 +390,7 @@ def setup_dbus_monitor():
         return True
     return False
 
-def _get_initial_service_properties(service_name):
+def _get_initial_service_properties(service_name: str) -> Optional[Dict[str, Any]]:
     """
     Helper to fetch initial properties for a service.
     """
@@ -414,7 +416,7 @@ def _get_initial_service_properties(service_name):
         return None
 
 
-def initialize_from_config(config: Config):
+def initialize_from_config(config: Config) -> None:
     """
     Initialize module-level variables from Config object.
     """
@@ -431,7 +433,7 @@ def initialize_from_config(config: Config):
     LOGGER.info("Initialized with %d monitored services", len(MONITORED_SERVICES))
 
 
-def signal_handler(_sig, _frame, main_loop):
+def signal_handler(_sig: int, _frame: Any, main_loop: GLib.MainLoop) -> None:
     """
     Handle termination signals with cleanup. Saves state before exiting.
     """
