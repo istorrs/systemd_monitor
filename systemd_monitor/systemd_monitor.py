@@ -21,7 +21,7 @@ from functools import partial # Used for signal_handler binding
 
 import dbus
 from dbus.mainloop.glib import DBusGMainLoop
-from gi.repository import GLib
+from gi.repository import GLib  # pylint: disable=no-name-in-module
 
 __git_tag__ = "manual_version"
 
@@ -78,11 +78,13 @@ SIGNAL_NAMES = {num: name for name, num in signal.__dict__.items()
 LOGGER = logging.getLogger('ServiceMonitor')
 LOGGER.setLevel(logging.INFO)
 DEFAULT_LOG_FILE = '/tmp/service_monitor.log'
-FILE_HANDLER = RotatingFileHandler(DEFAULT_LOG_FILE, maxBytes=1 * 1024 * 1024, backupCount=3)
-FILE_HANDLER.setLevel(logging.INFO)
+file_handler = RotatingFileHandler(
+    DEFAULT_LOG_FILE, maxBytes=1 * 1024 * 1024, backupCount=3
+)
+file_handler.setLevel(logging.INFO)
 FORMATTER = logging.Formatter('%(asctime)s - [%(levelname)s] %(message)s')
-FILE_HANDLER.setFormatter(FORMATTER)
-LOGGER.addHandler(FILE_HANDLER)
+file_handler.setFormatter(FORMATTER)
+LOGGER.addHandler(file_handler)
 # --- End logging setup ---
 
 def save_state():
@@ -143,8 +145,10 @@ def load_state():
                 }
             else:
                 # New service not in persistence file, initialize to default
-                SERVICE_STATES[service] = {'last_state': None, 'last_change_time': None, 'starts': 0,
-                                            'stops': 0, 'crashes': 0, 'logged_unloaded': False}
+                SERVICE_STATES[service] = {
+                    'last_state': None, 'last_change_time': None, 'starts': 0,
+                    'stops': 0, 'crashes': 0, 'logged_unloaded': False
+                }
 
         # Remove any services from SERVICE_STATES that are no longer in MONITORED_SERVICES
         services_to_remove = [s for s in SERVICE_STATES if s not in MONITORED_SERVICES]
@@ -166,11 +170,15 @@ def handle_properties_changed(service_name, _interface, changed, _invalidated):
     Handle PropertiesChanged signal to detect service state changes and crashes,
     and update persistent counters.
     """
-    current_active_state = str(changed.get('ActiveState', SERVICE_STATES[service_name]['last_state']))
+    current_active_state = str(
+        changed.get('ActiveState', SERVICE_STATES[service_name]['last_state'])
+    )
     current_sub_state = str(changed.get('SubState', 'unknown'))
     current_exec_main_status = int(changed.get('ExecMainStatus', 0))
     current_exec_main_code = int(changed.get('ExecMainCode', 0))
-    current_last_change_time = int(changed.get('StateChangeTimestamp', int(time.time() * 1000000)))
+    current_last_change_time = int(
+        changed.get('StateChangeTimestamp', int(time.time() * 1000000))
+    )
 
     last_state_info = SERVICE_STATES[service_name]
     last_active_state = last_state_info['last_state']
@@ -190,9 +198,10 @@ def handle_properties_changed(service_name, _interface, changed, _invalidated):
 
     # Define state categories for clearer logic.
     # 'deactivating' is a transient state that leads to a stop, so we consider it
-    # as part of the "non-stopped" state for the purpose of counting a stop *transition*.
+    # as part of the "non-stopped" state for counting a stop *transition*.
     running_like_states = ['active', 'activating', 'reloading', 'deactivating']
-    stopped_like_states = ['inactive', 'failed', 'dead', 'unloaded'] # 'unloaded' for initial state or if unit completely goes away
+    # 'unloaded' for initial state or if unit completely goes away
+    stopped_like_states = ['inactive', 'failed', 'dead', 'unloaded']
 
     # --- Logic for state transitions and counter updates ---
 
@@ -321,12 +330,15 @@ def setup_dbus_monitor():
         for service_name in MONITORED_SERVICES:
             current_props = _get_initial_service_properties(service_name)
             if current_props:
-                if SERVICE_STATES[service_name]['last_state'] != current_props['ActiveState'] or \
-                   SERVICE_STATES[service_name]['last_state'] is None:
+                if (SERVICE_STATES[service_name]['last_state'] !=
+                        current_props['ActiveState'] or
+                        SERVICE_STATES[service_name]['last_state'] is None):
+                    last_state = SERVICE_STATES[service_name]['last_state']
+                    last_state_str = last_state if last_state else 'None'
                     log_message = (
                         "Initial state for %s: %s -> %s (SubState: %s)",
                         service_name.ljust(MAX_SERVICE_NAME_LEN),
-                        (SERVICE_STATES[service_name]['last_state'] if SERVICE_STATES[service_name]['last_state'] else 'None').ljust(MAX_STATE_NAME_LEN),
+                        last_state_str.ljust(MAX_STATE_NAME_LEN),
                         current_props['ActiveState'].ljust(MAX_STATE_NAME_LEN),
                         current_props['SubState']
                     )
@@ -340,10 +352,13 @@ def setup_dbus_monitor():
                     )
                     LOGGER.info(*log_message)
 
-                SERVICE_STATES[service_name]['last_state'] = current_props['ActiveState']
-                SERVICE_STATES[service_name]['last_change_time'] = \
-                    time.strftime('%Y-%m-%d %H:%M:%S',
-                                  time.localtime(current_props['StateChangeTimestamp'] / 1000000))
+                SERVICE_STATES[service_name]['last_state'] = (
+                    current_props['ActiveState']
+                )
+                SERVICE_STATES[service_name]['last_change_time'] = time.strftime(
+                    '%Y-%m-%d %H:%M:%S',
+                    time.localtime(current_props['StateChangeTimestamp'] / 1000000)
+                )
                 SERVICE_STATES[service_name]['logged_unloaded'] = False
 
             else:
@@ -363,10 +378,12 @@ def setup_dbus_monitor():
                 unit_obj.connect_to_signal(
                     'PropertiesChanged',
                     lambda interface, changed, invalidated, s=service_name:
-                        handle_properties_changed(s, interface, changed, invalidated),
+                        handle_properties_changed(s, interface, changed,
+                                                   invalidated),
                     dbus_interface=SYSTEMD_PROPERTIES_INTERFACE
                 )
-                LOGGER.info("Subscribed to PropertiesChanged for %s", service_name.ljust(MAX_SERVICE_NAME_LEN))
+                LOGGER.info("Subscribed to PropertiesChanged for %s",
+                            service_name.ljust(MAX_SERVICE_NAME_LEN))
             except dbus.exceptions.DBusException as exc:
                 LOGGER.warning(
                     "Could not subscribe to %s: %s",
@@ -437,20 +454,28 @@ if __name__ == "__main__":
         description='Monitor systemd services.',
         add_help=False
     )
-    parser.add_argument('-h', '--help', action='store_true', help='Show help message and monitored services')
-    parser.add_argument('-v', '--version', action='store_true', help='Show module version')
-    parser.add_argument('-c', '--clear', action='store_true', help='Clear history log and persistence file')
-    parser.add_argument('-l', '--log-file', default=DEFAULT_LOG_FILE, help='Path to the monitoring log file')
-    parser.add_argument('-p', '--persistence-file', default=os.path.join(PERSISTENCE_DIR, PERSISTENCE_FILENAME), help='Path to the persistence file')
+    parser.add_argument('-h', '--help', action='store_true',
+                        help='Show help message and monitored services')
+    parser.add_argument('-v', '--version', action='store_true',
+                        help='Show module version')
+    parser.add_argument('-c', '--clear', action='store_true',
+                        help='Clear history log and persistence file')
+    parser.add_argument('-l', '--log-file', default=DEFAULT_LOG_FILE,
+                        help='Path to the monitoring log file')
+    parser.add_argument('-p', '--persistence-file',
+                        default=os.path.join(PERSISTENCE_DIR, PERSISTENCE_FILENAME),
+                        help='Path to the persistence file')
     ARGS = parser.parse_args()
 
     # If log file path is different from default, update handler
     if ARGS.log_file != DEFAULT_LOG_FILE:
-        LOGGER.removeHandler(FILE_HANDLER)
-        FILE_HANDLER = RotatingFileHandler(ARGS.log_file, maxBytes=1 * 1024 * 1024, backupCount=3)
-        FILE_HANDLER.setLevel(logging.INFO)
-        FILE_HANDLER.setFormatter(FORMATTER)
-        LOGGER.addHandler(FILE_HANDLER)
+        LOGGER.removeHandler(file_handler)
+        new_file_handler = RotatingFileHandler(
+            ARGS.log_file, maxBytes=1 * 1024 * 1024, backupCount=3
+        )
+        new_file_handler.setLevel(logging.INFO)
+        new_file_handler.setFormatter(FORMATTER)
+        LOGGER.addHandler(new_file_handler)
 
     # Update global persistence file path
     globals()['PERSISTENCE_FILE'] = ARGS.persistence_file
