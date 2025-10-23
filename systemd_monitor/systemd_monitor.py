@@ -17,7 +17,7 @@ import signal
 import sys
 import json
 import os
-from functools import partial # Used for signal_handler binding
+from functools import partial  # Used for signal_handler binding
 from typing import Dict, Any, Optional, List
 
 import dbus
@@ -34,8 +34,8 @@ DBusGMainLoop(set_as_default=True)
 # Configuration will be loaded from Config module
 # These are module-level variables that will be set by initialize_from_config()
 MONITORED_SERVICES = []  # pylint: disable=invalid-name
-PERSISTENCE_DIR = '/var/lib/service_monitor'
-PERSISTENCE_FILENAME = 'service_states.json'
+PERSISTENCE_DIR = "/var/lib/service_monitor"
+PERSISTENCE_FILENAME = "service_states.json"
 PERSISTENCE_FILE = os.path.join(PERSISTENCE_DIR, PERSISTENCE_FILENAME)
 
 # Calculate max service name length for consistent padding
@@ -44,12 +44,12 @@ MAX_SERVICE_NAME_LEN = 30  # Default, will be recalculated
 MAX_STATE_NAME_LEN = 12  # "deactivating" is 12 chars, "activating" 10, "inactive" 8
 
 # D-Bus service and object path constants
-SYSTEMD_DBUS_SERVICE = 'org.freedesktop.systemd1'
-SYSTEMD_DBUS_PATH = '/org/freedesktop/systemd1'
-SYSTEMD_MANAGER_INTERFACE = 'org.freedesktop.systemd1.Manager'
-SYSTEMD_UNIT_INTERFACE = 'org.freedesktop.systemd1.Unit'
-SYSTEMD_SERVICE_INTERFACE = 'org.freedesktop.systemd1.Service'
-SYSTEMD_PROPERTIES_INTERFACE = 'org.freedesktop.DBus.Properties'
+SYSTEMD_DBUS_SERVICE = "org.freedesktop.systemd1"
+SYSTEMD_DBUS_PATH = "/org/freedesktop/systemd1"
+SYSTEMD_MANAGER_INTERFACE = "org.freedesktop.systemd1.Manager"
+SYSTEMD_UNIT_INTERFACE = "org.freedesktop.systemd1.Unit"
+SYSTEMD_SERVICE_INTERFACE = "org.freedesktop.systemd1.Service"
+SYSTEMD_PROPERTIES_INTERFACE = "org.freedesktop.DBus.Properties"
 
 # Initialize D-Bus connection
 SYSTEM_BUS = dbus.SystemBus()
@@ -61,21 +61,25 @@ MANAGER_INTERFACE = dbus.Interface(SYSTEMD_OBJECT, SYSTEMD_MANAGER_INTERFACE)
 SERVICE_STATES = {}
 
 # Mapping of signal numbers to their names
-SIGNAL_NAMES = {num: name for name, num in signal.__dict__.items()
-                if name.startswith('SIG') and not name.startswith('SIG_')}
+SIGNAL_NAMES = {
+    num: name
+    for name, num in signal.__dict__.items()
+    if name.startswith("SIG") and not name.startswith("SIG_")
+}
 
 # --- Setup logging at module level with default log file ---
-LOGGER = logging.getLogger('ServiceMonitor')
+LOGGER = logging.getLogger("ServiceMonitor")
 LOGGER.setLevel(logging.INFO)
-DEFAULT_LOG_FILE = '/tmp/service_monitor.log'
+DEFAULT_LOG_FILE = "/tmp/service_monitor.log"
 file_handler = RotatingFileHandler(
     DEFAULT_LOG_FILE, maxBytes=1 * 1024 * 1024, backupCount=3
 )
 file_handler.setLevel(logging.INFO)
-FORMATTER = logging.Formatter('%(asctime)s - [%(levelname)s] %(message)s')
+FORMATTER = logging.Formatter("%(asctime)s - [%(levelname)s] %(message)s")
 file_handler.setFormatter(FORMATTER)
 LOGGER.addHandler(file_handler)
 # --- End logging setup ---
+
 
 def save_state() -> None:
     """
@@ -86,15 +90,17 @@ def save_state() -> None:
         serializable_states = {}
         for service, data in SERVICE_STATES.items():
             serializable_states[service] = {
-                'last_state': data['last_state'],
-                'last_change_time': data['last_change_time'],
-                'starts': data['starts'],
-                'stops': data['stops'],
-                'crashes': data['crashes'],
-                'logged_unloaded': data.get('logged_unloaded', False) # Ensure this key exists
+                "last_state": data["last_state"],
+                "last_change_time": data["last_change_time"],
+                "starts": data["starts"],
+                "stops": data["stops"],
+                "crashes": data["crashes"],
+                "logged_unloaded": data.get(
+                    "logged_unloaded", False
+                ),  # Ensure this key exists
             }
 
-        with open(PERSISTENCE_FILE, 'w', encoding='utf-8') as f:
+        with open(PERSISTENCE_FILE, "w", encoding="utf-8") as f:
             json.dump(serializable_states, f, indent=4)
         LOGGER.debug("Service states saved to %s", PERSISTENCE_FILE)
     except IOError as e:
@@ -110,15 +116,25 @@ def load_state() -> None:
     """
     global SERVICE_STATES  # pylint: disable=global-statement
     if not os.path.exists(PERSISTENCE_FILE):
-        LOGGER.info("Persistence file not found: %s. Initializing new states.", PERSISTENCE_FILE)
+        LOGGER.info(
+            "Persistence file not found: %s. Initializing new states.", PERSISTENCE_FILE
+        )
         # Initialize all services to default if no file exists
-        SERVICE_STATES = {service: {'last_state': None, 'last_change_time': None, 'starts': 0,
-                                    'stops': 0, 'crashes': 0, 'logged_unloaded': False}
-                          for service in MONITORED_SERVICES}
+        SERVICE_STATES = {
+            service: {
+                "last_state": None,
+                "last_change_time": None,
+                "starts": 0,
+                "stops": 0,
+                "crashes": 0,
+                "logged_unloaded": False,
+            }
+            for service in MONITORED_SERVICES
+        }
         return
 
     try:
-        with open(PERSISTENCE_FILE, 'r', encoding='utf-8') as f:
+        with open(PERSISTENCE_FILE, "r", encoding="utf-8") as f:
             loaded_states = json.load(f)
         LOGGER.info("Service states loaded from %s", PERSISTENCE_FILE)
 
@@ -126,18 +142,24 @@ def load_state() -> None:
         for service in MONITORED_SERVICES:
             if service in loaded_states:
                 SERVICE_STATES[service] = {
-                    'last_state': loaded_states[service].get('last_state'),
-                    'last_change_time': loaded_states[service].get('last_change_time'),
-                    'starts': loaded_states[service].get('starts', 0),
-                    'stops': loaded_states[service].get('stops', 0),
-                    'crashes': loaded_states[service].get('crashes', 0),
-                    'logged_unloaded': loaded_states[service].get('logged_unloaded', False)
+                    "last_state": loaded_states[service].get("last_state"),
+                    "last_change_time": loaded_states[service].get("last_change_time"),
+                    "starts": loaded_states[service].get("starts", 0),
+                    "stops": loaded_states[service].get("stops", 0),
+                    "crashes": loaded_states[service].get("crashes", 0),
+                    "logged_unloaded": loaded_states[service].get(
+                        "logged_unloaded", False
+                    ),
                 }
             else:
                 # New service not in persistence file, initialize to default
                 SERVICE_STATES[service] = {
-                    'last_state': None, 'last_change_time': None, 'starts': 0,
-                    'stops': 0, 'crashes': 0, 'logged_unloaded': False
+                    "last_state": None,
+                    "last_change_time": None,
+                    "starts": 0,
+                    "stops": 0,
+                    "crashes": 0,
+                    "logged_unloaded": False,
                 }
 
         # Remove any services from SERVICE_STATES that are no longer in MONITORED_SERVICES
@@ -147,81 +169,98 @@ def load_state() -> None:
             LOGGER.info("Removed unmonitored service from state: %s", service)
 
     except (IOError, json.JSONDecodeError) as e:
-        LOGGER.error("Error loading service states from %s: %s. Initializing with default states.",
-                     PERSISTENCE_FILE, e)
+        LOGGER.error(
+            "Error loading service states from %s: %s. Initializing with default states.",
+            PERSISTENCE_FILE,
+            e,
+        )
         # Fallback to default if load fails
-        SERVICE_STATES = {service: {'last_state': None, 'last_change_time': None, 'starts': 0,
-                                    'stops': 0, 'crashes': 0, 'logged_unloaded': False}
-                          for service in MONITORED_SERVICES}
+        SERVICE_STATES = {
+            service: {
+                "last_state": None,
+                "last_change_time": None,
+                "starts": 0,
+                "stops": 0,
+                "crashes": 0,
+                "logged_unloaded": False,
+            }
+            for service in MONITORED_SERVICES
+        }
 
 
-def handle_properties_changed(service_name: str, _interface: str,
-                               changed: Dict[str, Any], _invalidated: List[str]) -> None:
+def handle_properties_changed(
+    service_name: str, _interface: str, changed: Dict[str, Any], _invalidated: List[str]
+) -> None:
     """
     Handle PropertiesChanged signal to detect service state changes and crashes,
     and update persistent counters.
     """
     current_active_state = str(
-        changed.get('ActiveState', SERVICE_STATES[service_name]['last_state'])
+        changed.get("ActiveState", SERVICE_STATES[service_name]["last_state"])
     )
-    current_sub_state = str(changed.get('SubState', 'unknown'))
-    current_exec_main_status = int(changed.get('ExecMainStatus', 0))
-    current_exec_main_code = int(changed.get('ExecMainCode', 0))
+    current_sub_state = str(changed.get("SubState", "unknown"))
+    current_exec_main_status = int(changed.get("ExecMainStatus", 0))
+    current_exec_main_code = int(changed.get("ExecMainCode", 0))
     current_last_change_time = int(
-        changed.get('StateChangeTimestamp', int(time.time() * 1000000))
+        changed.get("StateChangeTimestamp", int(time.time() * 1000000))
     )
 
     last_state_info = SERVICE_STATES[service_name]
-    last_active_state = last_state_info['last_state']
+    last_active_state = last_state_info["last_state"]
 
     # Important: Do not process if ActiveState hasn't changed, unless it's the very first time.
     if current_active_state == last_active_state and last_active_state is not None:
         return
 
     # Prepare status meaning for crashes
-    status_meaning = SIGNAL_NAMES.get(current_exec_main_status,
-                                      f"signal {current_exec_main_status}") \
-                                      if current_exec_main_code == 2 else \
-                                      current_exec_main_status
+    status_meaning = (
+        SIGNAL_NAMES.get(current_exec_main_status, f"signal {current_exec_main_status}")
+        if current_exec_main_code == 2
+        else current_exec_main_status
+    )
 
     log_message = ""
-    counter_changed = False # Flag to indicate if counters were modified
+    counter_changed = False  # Flag to indicate if counters were modified
 
     # Define state categories for clearer logic.
     # 'deactivating' is a transient state that leads to a stop, so we consider it
     # as part of the "non-stopped" state for counting a stop *transition*.
-    running_like_states = ['active', 'activating', 'reloading', 'deactivating']
+    running_like_states = ["active", "activating", "reloading", "deactivating"]
     # 'unloaded' for initial state or if unit completely goes away
-    stopped_like_states = ['inactive', 'failed', 'dead', 'unloaded']
+    stopped_like_states = ["inactive", "failed", "dead", "unloaded"]
 
     # --- Logic for state transitions and counter updates ---
 
     # 1. Detect a START
     # Transition from a 'stopped-like' state (or None) to a 'running-like' state.
     # Exclude 'deactivating' as a target for a START.
-    if (last_active_state in stopped_like_states or last_active_state is None) and \
-       (current_active_state in ['activating', 'active', 'reloading']):
-        last_state_info['starts'] += 1
+    if (last_active_state in stopped_like_states or last_active_state is None) and (
+        current_active_state in ["activating", "active", "reloading"]
+    ):
+        last_state_info["starts"] += 1
         counter_changed = True
         log_message = (
             "Service %s: %s -> %s (START) - Starts: %d, Stops: %d, Crashes: %d",
             service_name.ljust(MAX_SERVICE_NAME_LEN),
-            (last_active_state if last_active_state else 'None').ljust(MAX_STATE_NAME_LEN),
+            (last_active_state if last_active_state else "None").ljust(
+                MAX_STATE_NAME_LEN
+            ),
             current_active_state.ljust(MAX_STATE_NAME_LEN),
-            last_state_info['starts'],
-            last_state_info['stops'],
-            last_state_info['crashes']
+            last_state_info["starts"],
+            last_state_info["stops"],
+            last_state_info["crashes"],
         )
         LOGGER.info(*log_message)
 
     # 2. Detect a STOP or CRASH
     # Transition from a 'running-like' state to a 'stopped-like' state.
-    elif (last_active_state in running_like_states) and \
-         (current_active_state in stopped_like_states):
-        last_state_info['stops'] += 1
+    elif (last_active_state in running_like_states) and (
+        current_active_state in stopped_like_states
+    ):
+        last_state_info["stops"] += 1
         counter_changed = True
-        if current_active_state == 'failed':
-            last_state_info['crashes'] += 1
+        if current_active_state == "failed":
+            last_state_info["crashes"] += 1
             log_message = (
                 "Service %s: %s -> %s (**CRASH**)! SubState: %s, Status: %s, Code: %d. "
                 "Crashes: %d, Starts: %d, Stops: %d",
@@ -231,68 +270,69 @@ def handle_properties_changed(service_name: str, _interface: str,
                 current_sub_state,
                 status_meaning,
                 current_exec_main_code,
-                last_state_info['crashes'],
-                last_state_info['starts'],
-                last_state_info['stops']
+                last_state_info["crashes"],
+                last_state_info["starts"],
+                last_state_info["stops"],
             )
             LOGGER.error(*log_message)
-        else: # It's a clean stop (inactive, dead)
+        else:  # It's a clean stop (inactive, dead)
             log_message = (
                 "Service %s: %s -> %s (STOP) - Starts: %d, Stops: %d, Crashes: %d",
                 service_name.ljust(MAX_SERVICE_NAME_LEN),
                 last_active_state.ljust(MAX_STATE_NAME_LEN),
                 current_active_state.ljust(MAX_STATE_NAME_LEN),
-                last_state_info['starts'],
-                last_state_info['stops'],
-                last_state_info['crashes']
+                last_state_info["starts"],
+                last_state_info["stops"],
+                last_state_info["crashes"],
             )
             LOGGER.info(*log_message)
 
     # 3. Handle specific transitions for clarity, without affecting counters if already handled
-    elif last_active_state == 'active' and current_active_state == 'deactivating':
+    elif last_active_state == "active" and current_active_state == "deactivating":
         log_message = (
             "Service %s: %s -> %s (SubState: %s)",
             service_name.ljust(MAX_SERVICE_NAME_LEN),
             last_active_state.ljust(MAX_STATE_NAME_LEN),
             current_active_state.ljust(MAX_STATE_NAME_LEN),
-            current_sub_state
+            current_sub_state,
         )
         LOGGER.info(*log_message)
-    elif last_active_state == 'active' and current_active_state == 'activating':
-        last_state_info['stops'] += 1
-        last_state_info['starts'] += 1
+    elif last_active_state == "active" and current_active_state == "activating":
+        last_state_info["stops"] += 1
+        last_state_info["starts"] += 1
         counter_changed = True
         log_message = (
             "Service %s: %s -> %s (RESTART_CYCLE) - Starts: %d, Stops: %d, Crashes: %d",
             service_name.ljust(MAX_SERVICE_NAME_LEN),
             last_active_state.ljust(MAX_STATE_NAME_LEN),
             current_active_state.ljust(MAX_STATE_NAME_LEN),
-            last_state_info['starts'],
-            last_state_info['stops'],
-            last_state_info['crashes']
+            last_state_info["starts"],
+            last_state_info["stops"],
+            last_state_info["crashes"],
         )
         LOGGER.info(*log_message)
     else:
         log_message = (
             "Service %s: %s -> %s (SubState: %s)",
             service_name.ljust(MAX_SERVICE_NAME_LEN),
-            (last_active_state if last_active_state else 'None').ljust(MAX_STATE_NAME_LEN),
+            (last_active_state if last_active_state else "None").ljust(
+                MAX_STATE_NAME_LEN
+            ),
             current_active_state.ljust(MAX_STATE_NAME_LEN),
-            current_sub_state
+            current_sub_state,
         )
         LOGGER.info(*log_message)
 
     # --- End Logic for state transitions and counter updates ---
 
     # Always update last_state after processing
-    last_state_info['last_state'] = current_active_state
-    last_state_info['last_change_time'] = time.strftime(
-        '%Y-%m-%d %H:%M:%S',
-        time.localtime(current_last_change_time / 1000000)
+    last_state_info["last_state"] = current_active_state
+    last_state_info["last_change_time"] = time.strftime(
+        "%Y-%m-%d %H:%M:%S", time.localtime(current_last_change_time / 1000000)
     )
     # Reset logged_unloaded flag if service is now in an active state
-    if current_active_state in ['active', 'activating', 'reloading']:
-        last_state_info['logged_unloaded'] = False
+    if current_active_state in ["active", "activating", "reloading"]:
+        last_state_info["logged_unloaded"] = False
 
     # Save state if counters were changed
     if counter_changed:
@@ -321,74 +361,76 @@ def setup_dbus_monitor() -> bool:
         for service_name in MONITORED_SERVICES:
             current_props = _get_initial_service_properties(service_name)
             if current_props:
-                if (SERVICE_STATES[service_name]['last_state'] !=
-                        current_props['ActiveState'] or
-                        SERVICE_STATES[service_name]['last_state'] is None):
-                    last_state = SERVICE_STATES[service_name]['last_state']
-                    last_state_str = last_state if last_state else 'None'
+                if (
+                    SERVICE_STATES[service_name]["last_state"]
+                    != current_props["ActiveState"]
+                    or SERVICE_STATES[service_name]["last_state"] is None
+                ):
+                    last_state = SERVICE_STATES[service_name]["last_state"]
+                    last_state_str = last_state if last_state else "None"
                     log_message = (
                         "Initial state for %s: %s -> %s (SubState: %s)",
                         service_name.ljust(MAX_SERVICE_NAME_LEN),
                         last_state_str.ljust(MAX_STATE_NAME_LEN),
-                        current_props['ActiveState'].ljust(MAX_STATE_NAME_LEN),
-                        current_props['SubState']
+                        current_props["ActiveState"].ljust(MAX_STATE_NAME_LEN),
+                        current_props["SubState"],
                     )
                     LOGGER.info(*log_message)
                 else:
                     log_message = (
                         "Initial state for %s: %s (SubState: %s)",
                         service_name.ljust(MAX_SERVICE_NAME_LEN),
-                        current_props['ActiveState'].ljust(MAX_STATE_NAME_LEN),
-                        current_props['SubState']
+                        current_props["ActiveState"].ljust(MAX_STATE_NAME_LEN),
+                        current_props["SubState"],
                     )
                     LOGGER.info(*log_message)
 
-                SERVICE_STATES[service_name]['last_state'] = (
-                    current_props['ActiveState']
+                SERVICE_STATES[service_name]["last_state"] = current_props[
+                    "ActiveState"
+                ]
+                SERVICE_STATES[service_name]["last_change_time"] = time.strftime(
+                    "%Y-%m-%d %H:%M:%S",
+                    time.localtime(current_props["StateChangeTimestamp"] / 1000000),
                 )
-                SERVICE_STATES[service_name]['last_change_time'] = time.strftime(
-                    '%Y-%m-%d %H:%M:%S',
-                    time.localtime(current_props['StateChangeTimestamp'] / 1000000)
-                )
-                SERVICE_STATES[service_name]['logged_unloaded'] = False
+                SERVICE_STATES[service_name]["logged_unloaded"] = False
 
             else:
-                if not SERVICE_STATES[service_name].get('logged_unloaded', False):
+                if not SERVICE_STATES[service_name].get("logged_unloaded", False):
                     LOGGER.warning(
                         "Service %s not loaded or accessible at startup. "
                         "Marking as 'unloaded'.",
-                        service_name.ljust(MAX_SERVICE_NAME_LEN)
+                        service_name.ljust(MAX_SERVICE_NAME_LEN),
                     )
-                    SERVICE_STATES[service_name]['logged_unloaded'] = True
-                SERVICE_STATES[service_name]['last_state'] = 'unloaded'
+                    SERVICE_STATES[service_name]["logged_unloaded"] = True
+                SERVICE_STATES[service_name]["last_state"] = "unloaded"
 
         for service_name in MONITORED_SERVICES:
             try:
                 unit_path = MANAGER_INTERFACE.GetUnit(service_name)
                 unit_obj = SYSTEM_BUS.get_object(SYSTEMD_DBUS_SERVICE, str(unit_path))
                 unit_obj.connect_to_signal(
-                    'PropertiesChanged',
-                    lambda interface, changed, invalidated, s=service_name:
-                        handle_properties_changed(s, interface, changed,
-                                                   invalidated),
-                    dbus_interface=SYSTEMD_PROPERTIES_INTERFACE
+                    "PropertiesChanged",
+                    lambda interface, changed, invalidated, s=service_name: (
+                        handle_properties_changed(s, interface, changed, invalidated)
+                    ),
+                    dbus_interface=SYSTEMD_PROPERTIES_INTERFACE,
                 )
-                LOGGER.info("Subscribed to PropertiesChanged for %s",
-                            service_name.ljust(MAX_SERVICE_NAME_LEN))
+                LOGGER.info(
+                    "Subscribed to PropertiesChanged for %s",
+                    service_name.ljust(MAX_SERVICE_NAME_LEN),
+                )
             except dbus.exceptions.DBusException as exc:
                 LOGGER.warning(
                     "Could not subscribe to %s: %s",
                     service_name.ljust(MAX_SERVICE_NAME_LEN),
-                    exc
+                    exc,
                 )
 
     except dbus.exceptions.DBusException as exc:
-        LOGGER.error(
-            "Failed to set up D-Bus monitoring: %s",
-            exc
-        )
+        LOGGER.error("Failed to set up D-Bus monitoring: %s", exc)
         return True
     return False
+
 
 def _get_initial_service_properties(service_name: str) -> Optional[Dict[str, Any]]:
     """
@@ -399,18 +441,20 @@ def _get_initial_service_properties(service_name: str) -> Optional[Dict[str, Any
         unit_obj = SYSTEM_BUS.get_object(SYSTEMD_DBUS_SERVICE, str(unit_path))
         unit_props = dbus.Interface(unit_obj, SYSTEMD_PROPERTIES_INTERFACE)
 
-        active_state = unit_props.Get(SYSTEMD_UNIT_INTERFACE, 'ActiveState')
-        sub_state = unit_props.Get(SYSTEMD_UNIT_INTERFACE, 'SubState')
-        exec_main_status = unit_props.Get(SYSTEMD_SERVICE_INTERFACE, 'ExecMainStatus')
-        exec_main_code = unit_props.Get(SYSTEMD_SERVICE_INTERFACE, 'ExecMainCode')
-        state_change_timestamp = unit_props.Get(SYSTEMD_UNIT_INTERFACE, 'StateChangeTimestamp')
+        active_state = unit_props.Get(SYSTEMD_UNIT_INTERFACE, "ActiveState")
+        sub_state = unit_props.Get(SYSTEMD_UNIT_INTERFACE, "SubState")
+        exec_main_status = unit_props.Get(SYSTEMD_SERVICE_INTERFACE, "ExecMainStatus")
+        exec_main_code = unit_props.Get(SYSTEMD_SERVICE_INTERFACE, "ExecMainCode")
+        state_change_timestamp = unit_props.Get(
+            SYSTEMD_UNIT_INTERFACE, "StateChangeTimestamp"
+        )
 
         return {
-            'ActiveState': str(active_state),
-            'SubState': str(sub_state),
-            'ExecMainStatus': int(exec_main_status),
-            'ExecMainCode': int(exec_main_code),
-            'StateChangeTimestamp': int(state_change_timestamp)
+            "ActiveState": str(active_state),
+            "SubState": str(sub_state),
+            "ExecMainStatus": int(exec_main_status),
+            "ExecMainCode": int(exec_main_code),
+            "StateChangeTimestamp": int(state_change_timestamp),
         }
     except dbus.exceptions.DBusException:
         return None
@@ -441,7 +485,7 @@ def signal_handler(_sig: int, _frame: Any, main_loop: GLib.MainLoop) -> None:
     # Save state before quitting
     save_state()
     try:
-        MANAGER_INTERFACE.Unsubscribe() # Unsubscribe from global systemd signals
+        MANAGER_INTERFACE.Unsubscribe()  # Unsubscribe from global systemd signals
         LOGGER.info("Successfully unsubscribed from systemd D-Bus signals.")
     except dbus.exceptions.DBusException as exc:
         LOGGER.warning("Failed to unsubscribe from D-Bus: %s", exc)
@@ -457,37 +501,49 @@ def signal_handler(_sig: int, _frame: Any, main_loop: GLib.MainLoop) -> None:
     main_loop.quit()
     sys.exit(0)
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='Monitor systemd services.',
-        add_help=False
+        description="Monitor systemd services.", add_help=False
     )
-    parser.add_argument('-h', '--help', action='store_true',
-                        help='Show help message and monitored services')
-    parser.add_argument('-v', '--version', action='store_true',
-                        help='Show module version')
-    parser.add_argument('-c', '--clear', action='store_true',
-                        help='Clear history log and persistence file')
-    parser.add_argument('--config', type=str,
-                        help='Path to JSON configuration file')
-    parser.add_argument('--services', nargs='+',
-                        help='List of services to monitor (overrides config file)')
-    parser.add_argument('-l', '--log-file', default=None,
-                        help='Path to the monitoring log file')
-    parser.add_argument('-p', '--persistence-file', default=None,
-                        help='Path to the persistence file')
-    parser.add_argument('--debug', action='store_true',
-                        help='Enable debug logging')
+    parser.add_argument(
+        "-h",
+        "--help",
+        action="store_true",
+        help="Show help message and monitored services",
+    )
+    parser.add_argument(
+        "-v", "--version", action="store_true", help="Show module version"
+    )
+    parser.add_argument(
+        "-c",
+        "--clear",
+        action="store_true",
+        help="Clear history log and persistence file",
+    )
+    parser.add_argument("--config", type=str, help="Path to JSON configuration file")
+    parser.add_argument(
+        "--services",
+        nargs="+",
+        help="List of services to monitor (overrides config file)",
+    )
+    parser.add_argument(
+        "-l", "--log-file", default=None, help="Path to the monitoring log file"
+    )
+    parser.add_argument(
+        "-p", "--persistence-file", default=None, help="Path to the persistence file"
+    )
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     ARGS = parser.parse_args()
 
     # Initialize configuration
     config_kwargs = {}
     if ARGS.debug:
-        config_kwargs['debug'] = True
+        config_kwargs["debug"] = True
     if ARGS.log_file:
-        config_kwargs['log_file'] = ARGS.log_file
+        config_kwargs["log_file"] = ARGS.log_file
     if ARGS.services:
-        config_kwargs['monitored_services'] = ARGS.services
+        config_kwargs["monitored_services"] = ARGS.services
 
     app_config = Config(config_file=ARGS.config, **config_kwargs)
 
@@ -513,7 +569,7 @@ if __name__ == "__main__":
 
     # Update global persistence file path
     if ARGS.persistence_file:
-        globals()['PERSISTENCE_FILE'] = ARGS.persistence_file
+        globals()["PERSISTENCE_FILE"] = ARGS.persistence_file
 
     if ARGS.help:
         print("\nService Monitor for systemd units\n")
@@ -523,7 +579,9 @@ if __name__ == "__main__":
         print(f"\nMonitoring results are logged to: {log_file_path}")
         print(f"Persistence file is located at: {PERSISTENCE_FILE}")
         print("\nUsage:")
-        print("  -h, --help                Show this help message and monitored services")
+        print(
+            "  -h, --help                Show this help message and monitored services"
+        )
         print("  -v, --version             Show module version")
         print("  -c, --clear               Clear history log and persistence file")
         print("  --config FILE             Path to JSON configuration file")
