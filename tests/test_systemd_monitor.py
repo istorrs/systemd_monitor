@@ -12,7 +12,7 @@ import pytest
 
 # Check if dbus is available
 try:
-    import dbus as _dbus_check  # pylint: disable=unused-import
+    import dbus as _dbus_check  # pylint: disable=unused-import  # noqa: F401
 
     DBUS_AVAILABLE = True
     # Only import if dbus is available

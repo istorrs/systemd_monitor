@@ -502,7 +502,37 @@ def signal_handler(_sig: int, _frame: Any, main_loop: GLib.MainLoop) -> None:
     sys.exit(0)
 
 
-if __name__ == "__main__":
+def _print_help(log_file_path: str) -> None:
+    """Print help message with monitored services."""
+    print("\nService Monitor for systemd units\n")
+    print("Monitored services:")
+    for svc in MONITORED_SERVICES:
+        print(f"  - {svc}")
+    print(f"\nMonitoring results are logged to: {log_file_path}")
+    print(f"Persistence file is located at: {PERSISTENCE_FILE}")
+    print("\nUsage:")
+    print("  -h, --help                Show this help message and monitored services")
+    print("  -v, --version             Show module version")
+    print("  -c, --clear               Clear history log and persistence file")
+    print("  --config FILE             Path to JSON configuration file")
+    print("  --services SERVICE [...]  List of services to monitor")
+    print("  -l, --log-file FILE       Path to the monitoring log file")
+    print("  -p, --persistence-file FILE Path to the persistence file")
+    print("  --debug                   Enable debug logging")
+
+
+def _clear_files(log_file: Optional[str], persistence_file: Optional[str]) -> None:
+    """Clear log file and persistence file if they exist."""
+    if log_file and os.path.exists(log_file):
+        os.remove(log_file)
+        print(f"Removed log file: {log_file}")
+    if persistence_file and os.path.exists(persistence_file):
+        os.remove(persistence_file)
+        print(f"Removed persistence file: {persistence_file}")
+
+
+def _create_argument_parser() -> argparse.ArgumentParser:
+    """Create and configure the argument parser."""
     parser = argparse.ArgumentParser(
         description="Monitor systemd services.", add_help=False
     )
@@ -534,91 +564,87 @@ if __name__ == "__main__":
         "-p", "--persistence-file", default=None, help="Path to the persistence file"
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
-    ARGS = parser.parse_args()
+    return parser
 
-    # Initialize configuration
-    config_kwargs = {}
-    if ARGS.debug:
-        config_kwargs["debug"] = True
-    if ARGS.log_file:
-        config_kwargs["log_file"] = ARGS.log_file
-    if ARGS.services:
-        config_kwargs["monitored_services"] = ARGS.services
 
-    app_config = Config(config_file=ARGS.config, **config_kwargs)
-
-    # Initialize module variables from config
-    initialize_from_config(app_config)
-
-    # Set log file path
-    log_file_path = ARGS.log_file if ARGS.log_file else app_config.log_file
-
-    # Update logging handler if needed
+def _setup_logging(log_file_path: str, debug: bool) -> None:
+    """Configure logging handlers and levels."""
     if log_file_path != DEFAULT_LOG_FILE:
         LOGGER.removeHandler(file_handler)
         new_file_handler = RotatingFileHandler(
             log_file_path, maxBytes=1 * 1024 * 1024, backupCount=3
         )
-        new_file_handler.setLevel(logging.DEBUG if app_config.debug else logging.INFO)
+        new_file_handler.setLevel(logging.DEBUG if debug else logging.INFO)
         new_file_handler.setFormatter(FORMATTER)
         LOGGER.addHandler(new_file_handler)
 
-    # Set debug level if requested
-    if app_config.debug:
+    if debug:
         LOGGER.setLevel(logging.DEBUG)
 
-    # Update global persistence file path
-    if ARGS.persistence_file:
-        globals()["PERSISTENCE_FILE"] = ARGS.persistence_file
 
-    if ARGS.help:
-        print("\nService Monitor for systemd units\n")
-        print("Monitored services:")
-        for svc in MONITORED_SERVICES:
-            print(f"  - {svc}")
-        print(f"\nMonitoring results are logged to: {log_file_path}")
-        print(f"Persistence file is located at: {PERSISTENCE_FILE}")
-        print("\nUsage:")
-        print(
-            "  -h, --help                Show this help message and monitored services"
-        )
-        print("  -v, --version             Show module version")
-        print("  -c, --clear               Clear history log and persistence file")
-        print("  --config FILE             Path to JSON configuration file")
-        print("  --services SERVICE [...]  List of services to monitor")
-        print("  -l, --log-file FILE       Path to the monitoring log file")
-        print("  -p, --persistence-file FILE Path to the persistence file")
-        print("  --debug                   Enable debug logging")
+def _handle_command_actions(
+    args: argparse.Namespace, log_file_path: str
+) -> bool:  # noqa: C901
+    """
+    Handle command-line actions (help, version, clear).
+
+    Returns:
+        bool: True if an action was performed and program should exit.
+    """
+    if args.help:
+        _print_help(log_file_path)
         sys.exit(0)
 
-    if ARGS.version:
+    if args.version:
         print(f"systemd.monitor version: {__git_tag__}")
         sys.exit(0)
 
-    if ARGS.clear:
-        # Remove log file and persistence file if they exist
-        if os.path.exists(ARGS.log_file):
-            os.remove(ARGS.log_file)
-            print(f"Removed log file: {ARGS.log_file}")
-        if os.path.exists(ARGS.persistence_file):
-            os.remove(ARGS.persistence_file)
-            print(f"Removed persistence file: {ARGS.persistence_file}")
+    if args.clear:
+        _clear_files(args.log_file, args.persistence_file)
         sys.exit(0)
 
-    MAIN_LOOP = GLib.MainLoop()
+    return False
 
-    # Set up signal handlers with reference to the GLib loop
-    # Using partial from functools for consistent signal handler binding
-    signal.signal(signal.SIGINT, partial(signal_handler, main_loop=MAIN_LOOP))
-    signal.signal(signal.SIGTERM, partial(signal_handler, main_loop=MAIN_LOOP))
+
+def main() -> None:
+    """Main entry point for the systemd monitor."""
+    parser = _create_argument_parser()
+    args = parser.parse_args()
+
+    # Initialize configuration
+    config_kwargs = {}
+    if args.debug:
+        config_kwargs["debug"] = True
+    if args.log_file:
+        config_kwargs["log_file"] = args.log_file
+    if args.services:
+        config_kwargs["monitored_services"] = args.services
+
+    app_config = Config(config_file=args.config, **config_kwargs)
+    initialize_from_config(app_config)
+
+    log_file_path = args.log_file if args.log_file else app_config.log_file
+    _setup_logging(log_file_path, app_config.debug)
+
+    if args.persistence_file:
+        globals()["PERSISTENCE_FILE"] = args.persistence_file
+
+    _handle_command_actions(args, log_file_path)
+
+    main_loop = GLib.MainLoop()
+
+    signal.signal(signal.SIGINT, partial(signal_handler, main_loop=main_loop))
+    signal.signal(signal.SIGTERM, partial(signal_handler, main_loop=main_loop))
 
     if setup_dbus_monitor():
         LOGGER.error("D-Bus monitoring setup failed. Exiting.")
         sys.exit(1)
 
     try:
-        MAIN_LOOP.run()
+        main_loop.run()
     except KeyboardInterrupt:
-        # KeyboardInterrupt will be caught by the signal handler, but
-        # this provides a fallback for direct execution without signal trapping
-        signal_handler(signal.SIGINT, None, MAIN_LOOP)
+        signal_handler(signal.SIGINT, None, main_loop)
+
+
+if __name__ == "__main__":
+    main()
