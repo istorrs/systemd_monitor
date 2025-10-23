@@ -70,7 +70,8 @@ SIGNAL_NAMES = {
 # --- Setup logging at module level with default log file ---
 LOGGER = logging.getLogger("ServiceMonitor")
 LOGGER.setLevel(logging.INFO)
-DEFAULT_LOG_FILE = "/tmp/service_monitor.log"
+# Using /tmp for default log is acceptable as it's overridable via --log-file
+DEFAULT_LOG_FILE = "/tmp/service_monitor.log"  # nosec B108
 file_handler = RotatingFileHandler(
     DEFAULT_LOG_FILE, maxBytes=1 * 1024 * 1024, backupCount=3
 )
