@@ -1,7 +1,4 @@
-# Note: requirements.txt is NOT included here for CI/CD
-# CI uses system packages for dbus-python and PyGObject
-# For local development, install requirements.txt separately if needed
-
+-r requirements.txt
 pytest>=6.0
 pytest-cov>=2.0
 black>=21.0

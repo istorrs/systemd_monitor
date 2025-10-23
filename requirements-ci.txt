@@ -1,0 +1,14 @@
+# CI/CD-specific requirements
+# Does NOT include requirements.txt because CI uses system packages for:
+# - python3-dbus (instead of pip dbus-python)
+# - python3-gi (instead of pip PyGObject)
+#
+# For local development, use requirements-dev.txt instead
+
+pytest>=6.0
+pytest-cov>=2.0
+pytest-mock>=3.0
+black>=21.0
+flake8>=3.8
+mypy>=0.800
+pylint>=2.0

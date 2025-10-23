@@ -27,9 +27,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pylint
-        # Skip requirements.txt - using system packages for dbus/gi
-        if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+        # Use requirements-ci.txt which excludes dbus packages (using system packages instead)
+        if [ -f requirements-ci.txt ]; then pip install -r requirements-ci.txt; fi
 
     - name: Lint with pylint
       env:
@@ -61,9 +60,8 @@ jobs:
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        # Skip requirements.txt - using system packages for dbus/gi
-        if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-        pip install pytest pytest-cov pytest-mock
+        # Use requirements-ci.txt which excludes dbus packages (using system packages instead)
+        if [ -f requirements-ci.txt ]; then pip install -r requirements-ci.txt; fi
 
     - name: Run tests
       env:
@@ -100,9 +98,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install black flake8 mypy
-        # Skip requirements.txt - using system packages for dbus/gi
-        if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+        # Use requirements-ci.txt which excludes dbus packages (using system packages instead)
+        if [ -f requirements-ci.txt ]; then pip install -r requirements-ci.txt; fi
 
     - name: Check formatting with black
       run: |
