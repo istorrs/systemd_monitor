@@ -10,3 +10,11 @@ coverage.xml
 
 # Test reports
 junit/
+
+# Automatically generated version file
+systemd_monitor/_version.py
+
+# Build artifacts
+build/
+dist/
+*.egg-info/

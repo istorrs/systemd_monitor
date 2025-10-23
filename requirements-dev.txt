@@ -9,3 +9,4 @@ pre-commit>=2.0
 pytest-mock>=3.0
 bandit>=1.7.0
 safety>=2.0
+setuptools_scm>=6.2
