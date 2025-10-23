@@ -28,7 +28,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pylint
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        # Skip requirements.txt - using system packages for dbus/gi
         if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
     - name: Lint with pylint
@@ -61,7 +61,7 @@ jobs:
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        # Skip requirements.txt - using system packages for dbus/gi
         if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
         pip install pytest pytest-cov pytest-mock
 
@@ -101,7 +101,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install black flake8 mypy
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        # Skip requirements.txt - using system packages for dbus/gi
         if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
     - name: Check formatting with black
