@@ -19,10 +19,16 @@ jobs:
       with:
         python-version: '3.11'
 
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libdbus-1-dev libglib2.0-dev pkg-config
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install pylint
+        pip install dbus-python PyGObject
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
@@ -49,11 +55,12 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-dbus python3-gi gir1.2-glib-2.0
+        sudo apt-get install -y libdbus-1-dev libglib2.0-dev pkg-config
 
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
+        pip install dbus-python PyGObject
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
         pip install pytest pytest-cov pytest-mock
@@ -83,10 +90,16 @@ jobs:
       with:
         python-version: '3.11'
 
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libdbus-1-dev libglib2.0-dev pkg-config
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install black flake8 mypy
+        pip install dbus-python PyGObject
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
