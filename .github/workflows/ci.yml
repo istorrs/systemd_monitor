@@ -22,17 +22,18 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libdbus-1-dev libglib2.0-dev libcairo2-dev libgirepository1.0-dev pkg-config
+        sudo apt-get install -y python3-dbus python3-gi gir1.2-glib-2.0
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install pylint
-        pip install dbus-python PyGObject
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
     - name: Lint with pylint
+      env:
+        PYTHONPATH: /usr/lib/python3/dist-packages
       run: |
         pylint systemd_monitor/ --rcfile=.pylintrc --fail-under=10
         pylint tests/ --rcfile=.pylintrc --fail-under=10
@@ -55,17 +56,18 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libdbus-1-dev libglib2.0-dev libcairo2-dev libgirepository1.0-dev pkg-config
+        sudo apt-get install -y python3-dbus python3-gi gir1.2-glib-2.0
 
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install dbus-python PyGObject
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
         pip install pytest pytest-cov pytest-mock
 
     - name: Run tests
+      env:
+        PYTHONPATH: /usr/lib/python3/dist-packages
       run: |
         pytest tests/ -v --cov=systemd_monitor --cov-report=xml --cov-report=term-missing
 
@@ -93,13 +95,12 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libdbus-1-dev libglib2.0-dev libcairo2-dev libgirepository1.0-dev pkg-config
+        sudo apt-get install -y python3-dbus python3-gi gir1.2-glib-2.0
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install black flake8 mypy
-        pip install dbus-python PyGObject
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
@@ -114,6 +115,8 @@ jobs:
 
     - name: Type check with mypy
       continue-on-error: true
+      env:
+        PYTHONPATH: /usr/lib/python3/dist-packages
       run: |
         mypy systemd_monitor/ --ignore-missing-imports
 
