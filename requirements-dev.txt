@@ -1,4 +1,7 @@
--r requirements.txt
+# Note: requirements.txt is NOT included here for CI/CD
+# CI uses system packages for dbus-python and PyGObject
+# For local development, install requirements.txt separately if needed
+
 pytest>=6.0
 pytest-cov>=2.0
 black>=21.0
@@ -6,3 +9,4 @@ flake8>=3.8
 mypy>=0.800
 pylint>=2.0
 pre-commit>=2.0
+pytest-mock>=3.0
