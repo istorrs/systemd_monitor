@@ -2,105 +2,123 @@
 
 ## Overview
 
-This project uses **semantic versioning** (SemVer) with a **single source of truth** approach.
+This project uses **setuptools_scm** for **automatic git-based versioning**. The version is derived from git tags - no manual version bumping needed!
 
 ## Version Format
 
+Versions follow **semantic versioning** (SemVer):
+
 ```
-MAJOR.MINOR.PATCH[-SUFFIX]
+MAJOR.MINOR.PATCH[.devN+gSHA][.dDATE]
 ```
 
-- **MAJOR**: Incompatible API changes
-- **MINOR**: Backwards-compatible functionality additions
-- **PATCH**: Backwards-compatible bug fixes
-- **SUFFIX**: Optional (e.g., `-dev`, `-rc1`, `-alpha`)
+### Examples
 
-## Single Source of Truth
+| Git State | Version | Meaning |
+|-----------|---------|---------|
+| On tag `v0.1.0` | `0.1.0` | Official release |
+| 3 commits after `v0.1.0` | `0.1.1.dev3+g1234abc` | 3 commits into 0.1.1 development |
+| Dirty working tree | `0.1.1.dev3+g1234abc.d20251023` | Uncommitted changes |
+| No tags | `0.0.0+unknown` | No version tags exist yet |
 
-**The version is defined ONLY in `pyproject.toml`:**
+**Format breakdown:**
+- `0.1.1` - Next release version
+- `.dev3` - 3 commits since last tag
+- `+g1234abc` - Git commit SHA (first 7 chars)
+- `.d20251023` - Dirty tree on 2025-10-23
 
-```toml
-[project]
-name = "systemd_monitor"
-version = "0.1.0"
-```
+## How It Works
+
+**Automatic Version Derivation:**
+1. setuptools_scm reads git history
+2. Finds the most recent tag matching `v*.*.*`
+3. Counts commits since that tag
+4. Includes git SHA and dirty state
+5. Generates `systemd_monitor/_version.py` (auto-generated, in .gitignore)
+
+**No manual version management needed!**
 
 ## Runtime Version Access
 
-The version is automatically available at runtime via `importlib.metadata`:
+The version is automatically available at runtime:
 
 ```python
 # In code
 from systemd_monitor import __version__
-print(__version__)  # "0.1.0"
+print(__version__)  # "0.1.1.dev3+g1234abc"
 
 # Command line
-systemd-monitor --version  # "systemd-monitor version: 0.1.0"
+systemd-monitor --version  # "systemd-monitor version: 0.1.1.dev3+g1234abc"
+
+# From installed package
+pip show systemd_monitor | grep Version
 ```
-
-## How It Works
-
-1. **Package Metadata**: Version is defined in `pyproject.toml`
-2. **Runtime Import**: `systemd_monitor/__init__.py` reads version using `importlib.metadata.version()`
-3. **Fallback**: If package is not installed, falls back to `"0.1.0-dev"`
-4. **CLI Access**: The `--version` flag displays the version
 
 ## Development Setup
 
-For version to work correctly in development, install package in editable mode:
+**For version to work correctly in development:**
 
 ```bash
-pip install -e .
-```
+# Install setuptools_scm
+pip install setuptools_scm
 
-This makes the package metadata available to `importlib.metadata`.
+# Install package in editable mode (recommended)
+pip install -e .
+
+# Or just import - setuptools_scm works directly from git
+python -c "from systemd_monitor import __version__; print(__version__)"
+```
 
 ## Releasing a New Version
 
-### 1. Update Version
+### Simple Release Process
 
-Edit `pyproject.toml`:
-
-```toml
-[project]
-version = "0.2.0"  # Bump version here
-```
-
-### 2. Update CHANGELOG.md
-
-Document what changed:
-
-```markdown
-## [0.2.0] - 2025-01-15
-
-### Added
-- New feature X
-- Enhancement Y
-
-### Fixed
-- Bug Z
-```
-
-### 3. Commit and Tag
+**You only need to create a git tag - everything else is automatic!**
 
 ```bash
-# Commit version bump
-git add pyproject.toml CHANGELOG.md
-git commit -m "Bump version to 0.2.0"
+# 1. Ensure all changes are committed
+git status
 
-# Create git tag
-git tag -a v0.2.0 -m "Release version 0.2.0"
+# 2. Update CHANGELOG.md with release notes
+# Document what changed in this release
 
-# Push changes and tags
+# 3. Commit changelog
+git add CHANGELOG.md
+git commit -m "Update changelog for v0.2.0"
+
+# 4. Create annotated tag
+git tag -a v0.2.0 -m "Release version 0.2.0
+
+- Feature X added
+- Bug Y fixed
+- Enhancement Z implemented
+"
+
+# 5. Push commits and tags
 git push origin main
 git push origin v0.2.0
+
+# That's it! Version is now 0.2.0 automatically
 ```
 
-### 4. Build and Publish (Optional)
+### Version Bumping
+
+setuptools_scm automatically determines the next version:
+
+- **Patch bump** (0.1.0 → 0.1.1): Default for any commits after a tag
+- **Minor bump** (0.1.0 → 0.2.0): Create tag `v0.2.0` explicitly
+- **Major bump** (0.1.0 → 1.0.0): Create tag `v1.0.0` explicitly
+
+**The version is in the tag name - that's the single source of truth!**
+
+### Build and Publish (Optional)
 
 ```bash
-# Build distribution
+# Build distribution packages
 python -m build
+
+# Verify version in built package
+tar -tzf dist/systemd_monitor-0.2.0.tar.gz | grep _version.py
 
 # Publish to PyPI
 python -m twine upload dist/*
@@ -111,58 +129,125 @@ python -m twine upload dist/*
 Verify version is correct:
 
 ```bash
-# Check installed version
+# Check current version (from git)
 python -c "from systemd_monitor import __version__; print(__version__)"
 
-# Check via CLI
-systemd-monitor --version
+# Check all tags
+git tag -l
 
-# Check package metadata
-pip show systemd_monitor | grep Version
+# Check commits since last tag
+git log $(git describe --tags --abbrev=0)..HEAD --oneline
+
+# Check what next version will be
+python -m setuptools_scm
 ```
 
-## Automated Testing
+## Benefits
 
-The test suite includes version tests:
+✅ **Automatic** - No manual version bumping
+✅ **Accurate** - Version includes exact commit SHA
+✅ **Traceable** - Always know what code is running
+✅ **Simple** - Just create git tags
+✅ **PEP 440 Compliant** - Standard Python versioning
+✅ **Development Versions** - Clear distinction between releases and dev builds
+✅ **No Forgotten Bumps** - Impossible to forget to update version
 
-```python
-def test_version_attribute_exists():
-    """Test that __version__ attribute exists."""
-    assert hasattr(systemd_monitor, "__version__")
-    assert isinstance(systemd_monitor.__version__, str)
+## Configuration
+
+Version behavior is configured in `pyproject.toml`:
+
+```toml
+[tool.setuptools_scm]
+write_to = "systemd_monitor/_version.py"
+version_scheme = "post-release"
+local_scheme = "node-and-date"
 ```
 
-## Why This Approach?
+**Options:**
+- `write_to` - Where to write version file
+- `version_scheme` - How to calculate next version
+- `local_scheme` - Format for dev versions (includes git SHA and date)
 
-✅ **Single Source of Truth**: Version only in `pyproject.toml`
-✅ **PEP 621 Compliant**: Uses modern Python packaging standards
-✅ **Simple**: No complex build tools or version file generation
-✅ **Reliable**: Works both in development and production
-✅ **Testable**: Easy to verify version is correct
+## Troubleshooting
 
-## Alternative Approaches Considered
+### "Version shows 0.0.0+unknown"
 
-### ❌ setuptools_scm (Git Tag Based)
+**Cause**: No git tags exist
 
-- **Pros**: Automatic version from git tags
-- **Cons**: Requires git, more complex, harder to debug
-- **Decision**: Too complex for this project
+**Solution**: Create initial tag
+```bash
+git tag -a v0.1.0 -m "Initial release"
+```
 
-### ❌ Separate __version__.py File
+### "Version not updating"
 
-- **Pros**: Explicit version file
-- **Cons**: Duplication, needs to be kept in sync with pyproject.toml
-- **Decision**: Violates single source of truth principle
+**Cause**: Using old installed version
 
-### ❌ Hardcoded Version
+**Solution**: Reinstall in editable mode
+```bash
+pip install -e .
+```
 
-- **Pros**: Simple
-- **Cons**: Easy to forget to update, no connection to package metadata
-- **Decision**: Not maintainable
+### "Can't import _version.py"
+
+**Cause**: Package not built/installed
+
+**Solution**: setuptools_scm will use git directly as fallback
+
+## Why setuptools_scm?
+
+### Advantages over manual versioning:
+
+| Manual Version | setuptools_scm |
+|----------------|----------------|
+| ❌ Easy to forget to bump | ✅ Automatic from git tags |
+| ❌ No way to know exact commit | ✅ Includes commit SHA |
+| ❌ Dev builds look like releases | ✅ Clear `.dev` marker |
+| ❌ Requires discipline | ✅ Foolproof |
+| ❌ Can be out of sync | ✅ Always accurate |
+
+### Alternatives Considered
+
+**❌ Manual version in `pyproject.toml`**
+- Pro: Simple
+- Con: Easy to forget, no commit info
+- Decision: Too error-prone
+
+**❌ Separate `__version__.py` file**
+- Pro: Explicit
+- Con: Still manual, duplication
+- Decision: Same problems as manual
+
+**❌ versioneer**
+- Pro: Similar to setuptools_scm
+- Con: More complex, requires setup step
+- Decision: setuptools_scm is simpler
 
 ## References
 
+- [setuptools_scm Documentation](https://setuptools-scm.readthedocs.io/)
 - [PEP 440 - Version Identification](https://peps.python.org/pep-0440/)
-- [PEP 621 - Storing project metadata in pyproject.toml](https://peps.python.org/pep-0621/)
 - [Semantic Versioning 2.0.0](https://semver.org/)
 - [Python Packaging User Guide](https://packaging.python.org/)
+
+## Quick Reference
+
+```bash
+# Check current version
+python -c "from systemd_monitor import __version__; print(__version__)"
+
+# Create release
+git tag -a v0.2.0 -m "Release 0.2.0"
+git push origin v0.2.0
+
+# List all versions
+git tag -l
+
+# Show version without installing
+python -m setuptools_scm
+
+# Build with correct version
+python -m build
+```
+
+**Remember: The git tag IS the version. Everything else is automatic!**
