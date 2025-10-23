@@ -11,7 +11,7 @@
 *   **Flexible Configuration**: Supports configuration via JSON files and command-line arguments
 *   **Configurable Service List**: Monitor any set of systemd services via config file or CLI
 *   **Clean Architecture**: Separated configuration module (`config.py`) for better code organization
-*   **Comprehensive Testing**: **51 unit tests** with **70% code coverage** - all tests run without dbus!
+*   **Comprehensive Testing**: **75 unit tests** with **99% code coverage** - all tests run without dbus!
 *   **Code Quality**: 100% pylint compliant with comprehensive pre-commit hooks
 *   **CI/CD Pipeline**: Full GitHub Actions workflow with test result visualization
 *   **Graceful Shutdown**: Handles signals (SIGINT, SIGTERM) to save state and exit cleanly
@@ -285,9 +285,9 @@ pytest --no-cov
 ```
 
 **Test Coverage:**
-- Total: **70% coverage**
+- Total: **99% coverage**
 - `config.py`: 100% coverage (28 tests)
-- `systemd_monitor.py`: 62% coverage (23 tests)
+- `systemd_monitor.py`: 99% coverage (47 tests)
 - All tests use mocked dbus dependencies - no actual systemd required!
 
 ### Code Quality
@@ -329,7 +329,7 @@ pre-commit install
 2. **Black**: Code must be formatted correctly
 3. **Flake8**: No syntax errors, complexity under 10, lines under 100 chars
 4. **Bandit**: No security vulnerabilities
-5. **Pytest**: All 51 unit tests must pass
+5. **Pytest**: All 75 unit tests must pass
 
 See `PRE_COMMIT_HOOK.md` for details.
 
@@ -359,7 +359,7 @@ The CI/CD workflow uses system-installed dbus packages (`python3-dbus`, `python3
 
 ### Test Results
 
-You should see: **"51 passed in X.XX seconds"**
+You should see: **"75 passed in X.XX seconds"**
 
 All tests now run successfully without dbus installed thanks to comprehensive mocking!
 
@@ -391,13 +391,13 @@ If you see D-Bus connection errors:
 5. Submit a pull request
 
 **All contributions must:**
-- Pass all 51 unit tests
+- Pass all 75 unit tests
 - Achieve 10/10 pylint score
 - Pass Black formatting
 - Pass Flake8 checks
 - Pass Bandit security scan
 - Include documentation updates
-- Maintain or improve code coverage
+- Maintain or improve code coverage (currently at 99%)
 
 ## Documentation
 
@@ -447,13 +447,12 @@ MIT License - see LICENSE file for details.
 - ✅ Config.py module integration
 - ✅ GitHub Actions CI/CD pipeline
 - ✅ Comprehensive type hints
-- ✅ 51 unit tests with mocking
+- ✅ 75 unit tests with mocking (99% coverage!)
 - ✅ Pre-commit hooks (5 quality gates)
 - ✅ Test result visualization
 - ✅ Security scanning
 
 **In Progress:**
-- 🔄 Improve test coverage to 80%+
 - 🔄 Integration test suite
 
 **Planned:**
