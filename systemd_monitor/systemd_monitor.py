@@ -25,8 +25,7 @@ from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib  # pylint: disable=no-name-in-module
 
 from systemd_monitor.config import Config
-
-__git_tag__ = "manual_version"
+from systemd_monitor import __version__
 
 # Set up DBusGMainLoop globally before any D-Bus interaction
 DBusGMainLoop(set_as_default=True)
@@ -597,7 +596,7 @@ def _handle_command_actions(
         sys.exit(0)
 
     if args.version:
-        print(f"systemd.monitor version: {__git_tag__}")
+        print(f"systemd-monitor version: {__version__}")
         sys.exit(0)
 
     if args.clear:

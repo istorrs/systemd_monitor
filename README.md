@@ -11,7 +11,7 @@
 *   **Flexible Configuration**: Supports configuration via JSON files and command-line arguments
 *   **Configurable Service List**: Monitor any set of systemd services via config file or CLI
 *   **Clean Architecture**: Separated configuration module (`config.py`) for better code organization
-*   **Comprehensive Testing**: **75 unit tests** with **99% code coverage** - all tests run without dbus!
+*   **Comprehensive Testing**: **77 unit tests** with **99% code coverage** - all tests run without dbus!
 *   **Code Quality**: 100% pylint compliant with comprehensive pre-commit hooks
 *   **CI/CD Pipeline**: Full GitHub Actions workflow with test result visualization
 *   **Graceful Shutdown**: Handles signals (SIGINT, SIGTERM) to save state and exit cleanly
@@ -329,7 +329,7 @@ pre-commit install
 2. **Black**: Code must be formatted correctly
 3. **Flake8**: No syntax errors, complexity under 10, lines under 100 chars
 4. **Bandit**: No security vulnerabilities
-5. **Pytest**: All 75 unit tests must pass
+5. **Pytest**: All 77 unit tests must pass
 
 See `PRE_COMMIT_HOOK.md` for details.
 
@@ -359,7 +359,7 @@ The CI/CD workflow uses system-installed dbus packages (`python3-dbus`, `python3
 
 ### Test Results
 
-You should see: **"75 passed in X.XX seconds"**
+You should see: **"77 passed in X.XX seconds"**
 
 All tests now run successfully without dbus installed thanks to comprehensive mocking!
 
@@ -391,7 +391,7 @@ If you see D-Bus connection errors:
 5. Submit a pull request
 
 **All contributions must:**
-- Pass all 75 unit tests
+- Pass all 77 unit tests
 - Achieve 10/10 pylint score
 - Pass Black formatting
 - Pass Flake8 checks
@@ -402,6 +402,7 @@ If you see D-Bus connection errors:
 ## Documentation
 
 - **CHANGELOG.md**: Version history and migration guides
+- **VERSIONING.md**: Versioning strategy and release process
 - **PRE_COMMIT_HOOK.md**: Pre-commit hook documentation
 - **PR2_ANALYSIS.md**: Development roadmap and architecture analysis
 - **COMPLETION_SUMMARY.md**: Project completion status
@@ -447,7 +448,7 @@ MIT License - see LICENSE file for details.
 - ✅ Config.py module integration
 - ✅ GitHub Actions CI/CD pipeline
 - ✅ Comprehensive type hints
-- ✅ 75 unit tests with mocking (99% coverage!)
+- ✅ 77 unit tests with mocking (99% coverage!)
 - ✅ Pre-commit hooks (5 quality gates)
 - ✅ Test result visualization
 - ✅ Security scanning

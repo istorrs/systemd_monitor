@@ -8,6 +8,7 @@ dbus/systemd installation.
 
 # pylint: disable=import-error,attribute-defined-outside-init
 # pylint: disable=import-outside-toplevel,protected-access,too-few-public-methods
+# pylint: disable=too-many-lines  # Test files can be long for comprehensive coverage
 import sys
 import os
 import json
@@ -835,6 +836,10 @@ class TestCLIHelpers:
         with patch("builtins.print") as mock_print, patch("sys.exit") as mock_exit:
             systemd_monitor._handle_command_actions(args, "/tmp/test.log")
             mock_print.assert_called_once()
+            # Verify version string is displayed
+            call_args = mock_print.call_args[0][0]
+            assert "systemd-monitor version:" in call_args
+            assert systemd_monitor.__version__ in call_args
             mock_exit.assert_called_once_with(0)
 
     def test_handle_command_actions_clear(self):
@@ -962,6 +967,23 @@ class TestMainFunction:
                 assert mock_setup_log.called
                 # Check that PERSISTENCE_FILE was updated
                 assert systemd_monitor.PERSISTENCE_FILE == "/tmp/custom_state.json"
+
+
+class TestVersion:
+    """Test version information."""
+
+    def test_version_attribute_exists(self):
+        """Test that __version__ attribute exists."""
+        assert hasattr(systemd_monitor, "__version__")
+        assert isinstance(systemd_monitor.__version__, str)
+
+    def test_version_format(self):
+        """Test that version follows semantic versioning format."""
+        version = systemd_monitor.__version__
+        # Should be either X.Y.Z or X.Y.Z-dev or similar
+        assert len(version) > 0
+        # Should contain at least one dot for version parts
+        assert "." in version or "-dev" in version
 
 
 class TestConstants:
