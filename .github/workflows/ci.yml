@@ -67,7 +67,26 @@ jobs:
       env:
         PYTHONPATH: /usr/lib/python3/dist-packages
       run: |
-        pytest tests/ -v --cov=systemd_monitor --cov-report=xml --cov-report=term-missing
+        pytest tests/ -v \
+          --cov=systemd_monitor \
+          --cov-report=xml \
+          --cov-report=term-missing \
+          --junitxml=junit/test-results-${{ matrix.python-version }}.xml
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ matrix.python-version }}
+        path: junit/test-results-${{ matrix.python-version }}.xml
+
+    - name: Publish test results
+      uses: EnricoMi/publish-unit-test-result-action@v2
+      if: always()
+      with:
+        files: junit/test-results-${{ matrix.python-version }}.xml
+        check_name: Test Results (Python ${{ matrix.python-version }})
+        comment_mode: off
 
     - name: Upload coverage to Codecov
       if: matrix.python-version == '3.11'

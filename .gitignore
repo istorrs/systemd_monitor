@@ -6,3 +6,7 @@ venv/
 .coverage
 htmlcov/
 .pytest_cache/
+coverage.xml
+
+# Test reports
+junit/
