@@ -12,3 +12,4 @@ black>=21.0
 flake8>=3.8
 mypy>=0.800
 pylint>=2.0
+setuptools_scm>=6.2

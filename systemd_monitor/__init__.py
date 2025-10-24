@@ -11,7 +11,7 @@ except ImportError:
     # Fallback for development without installation
     # Version will be derived from git tags on next install
     try:
-        from setuptools_scm import get_version
+        from setuptools_scm import get_version  # pylint: disable=import-error
 
         __version__ = get_version(root="..", relative_to=__file__)
     except Exception:  # pylint: disable=broad-exception-caught
