@@ -7,11 +7,12 @@
 *   **Event-Driven Architecture**: Uses D-Bus `PropertiesChanged` callbacks for immediate, efficient state change notifications
 *   **Persistent State Tracking**: Counts of starts, stops, and crashes are persisted to JSON and survive script restarts
 *   **Real-Time Logging**: Logs all service state changes with timestamps to rotating log files
+*   **Prometheus Metrics**: Built-in metrics exporter for monitoring with Prometheus/Grafana
 *   **Crash Detection**: Identifies and logs service crashes with exit codes and signals
 *   **Flexible Configuration**: Supports configuration via JSON files and command-line arguments
 *   **Configurable Service List**: Monitor any set of systemd services via config file or CLI
 *   **Clean Architecture**: Separated configuration module (`config.py`) for better code organization
-*   **Comprehensive Testing**: **77 unit tests** with **99% code coverage** - all tests run without dbus!
+*   **Comprehensive Testing**: **99 unit tests** with **96% code coverage** - all tests run without dbus!
 *   **Code Quality**: 100% pylint compliant with comprehensive pre-commit hooks
 *   **CI/CD Pipeline**: Full GitHub Actions workflow with test result visualization
 *   **Graceful Shutdown**: Handles signals (SIGINT, SIGTERM) to save state and exit cleanly
@@ -73,6 +74,8 @@ The integrated `config.py` module provides comprehensive configuration managemen
 - `log_file`: Path to log file (default: `/tmp/service_monitor.log`)
 - `debug`: Enable debug logging (default: `false`)
 - `max_retries`: Maximum retry attempts for failed operations (default: 3)
+- `prometheus_enabled`: Enable Prometheus metrics exporter (default: `true`)
+- `prometheus_port`: Port for Prometheus HTTP endpoint (default: `9100`)
 
 **Reserved for Future Use:**
 - `poll_interval`: Would set polling interval if we used polling (we don't)
@@ -144,11 +147,88 @@ mosquitto.service
 wps_button_monitor.service
 ```
 
+## Prometheus Metrics
+
+The systemd monitor includes a built-in Prometheus metrics exporter for monitoring service health with Prometheus/Grafana.
+
+### Available Metrics
+
+**Gauges:**
+- `systemd_service_state{service="<name>"}` - Current service state (1=active, 0=inactive, 2=activating, 3=deactivating, -1=failed, -2=unloaded)
+- `systemd_service_last_change_timestamp{service="<name>"}` - Unix timestamp of last state change
+
+**Counters (since monitor started):**
+- `systemd_service_starts_total{service="<name>"}` - Total number of service starts
+- `systemd_service_stops_total{service="<name>"}` - Total number of service stops
+- `systemd_service_crashes_total{service="<name>"}` - Total number of service crashes (failed state)
+- `systemd_service_restarts_total{service="<name>"}` - Total number of restart cycles
+
+**Info:**
+- `systemd_monitor_info{version="<ver>", monitored_services="<list>", service_count="<n>"}` - Monitor metadata
+
+### Configuration
+
+**Enable/Disable:**
+```bash
+# Enable (default)
+systemd-monitor --services nginx.service
+
+# Disable Prometheus
+systemd-monitor --services nginx.service --no-prometheus
+
+# Custom port (default: 9100)
+systemd-monitor --services nginx.service --prometheus-port 8080
+```
+
+**Access Metrics:**
+```bash
+curl http://localhost:9100/metrics
+```
+
+### Example Prometheus Config
+
+```yaml
+scrape_configs:
+  - job_name: 'systemd-monitor'
+    static_configs:
+      - targets: ['localhost:9100']
+```
+
+### Example Grafana Queries
+
+**Service State Over Time:**
+```promql
+systemd_service_state{service="nginx.service"}
+```
+
+**Start Rate (per 5 minutes):**
+```promql
+rate(systemd_service_starts_total{service="nginx.service"}[5m])
+```
+
+**Crash Count:**
+```promql
+systemd_service_crashes_total{service="nginx.service"}
+```
+
+**All Services Up/Down:**
+```promql
+systemd_service_state == 1
+```
+
+### Notes
+
+- Counters track deltas only (since monitor started), not historical persisted values
+- State gauges are initialized from persisted state on startup
+- If `prometheus-client` is not installed, metrics are automatically disabled
+- Install with: `pip install prometheus-client>=0.14.0`
+
 ## Prerequisites
 
 *   Python 3.8+ (tested on 3.8, 3.9, 3.10, 3.11)
 *   `python-dbus` (or `python3-dbus`)
 *   `python-gi` (or `python3-gi`, `gir1.2-glib-2.0`)
+*   `prometheus-client` (optional, for metrics export)
 
 Install on Debian-based systems:
 ```bash
