@@ -1,3 +1,20 @@
 systemd_monitor.log
 *.pyc
 venv/
+
+# Coverage reports
+.coverage
+htmlcov/
+.pytest_cache/
+coverage.xml
+
+# Test reports
+junit/
+
+# Automatically generated version file
+systemd_monitor/_version.py
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
