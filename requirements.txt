@@ -1,3 +1,11 @@
-dbus-python>=1.2.0
+# D-Bus libraries (choose based on your system):
+# - dbus-python: Faster but requires C compiler (preferred if available)
+# - jeepney: Pure Python, works on systems without build tools (fallback)
+dbus-python>=1.2.0  # Optional: requires C compiler, faster
+jeepney>=0.8.0  # Required: pure Python fallback, always works
+
+# GLib for event loop (dbus-python only, optional with jeepney)
 PyGObject>=3.36.0
+
+# Metrics export
 prometheus-client>=0.14.0 

@@ -20,16 +20,36 @@ import os
 from functools import partial  # Used for signal_handler binding
 from typing import Dict, Any, Optional, List
 
-import dbus
-from dbus.mainloop.glib import DBusGMainLoop
-from gi.repository import GLib  # pylint: disable=no-name-in-module
+# Try to import dbus-python first (requires C compiler)
+# Fall back to pure-Python Jeepney shim if unavailable
+try:
+    import dbus
+    from dbus.mainloop.glib import DBusGMainLoop
 
+    USING_JEEPNEY_SHIM = False
+    LOGGER_TEMP = logging.getLogger(__name__)
+    LOGGER_TEMP.info("Using dbus-python for D-Bus communication")
+except ImportError:
+    # dbus-python not available, use Jeepney shim
+    # pylint: disable=ungrouped-imports
+    from systemd_monitor import dbus_shim as dbus  # type: ignore
+
+    USING_JEEPNEY_SHIM = True
+    LOGGER_TEMP = logging.getLogger(__name__)
+    LOGGER_TEMP.info("Using Jeepney shim for D-Bus communication (pure Python)")
+
+# Import GLib for event loop
+# pylint: disable=no-name-in-module,wrong-import-position
+from gi.repository import GLib
+
+# pylint: disable=wrong-import-position
 from systemd_monitor.config import Config
 from systemd_monitor import __version__
 from systemd_monitor.prometheus_metrics import get_metrics
 
-# Set up DBusGMainLoop globally before any D-Bus interaction
-DBusGMainLoop(set_as_default=True)
+# Set up DBusGMainLoop globally before any D-Bus interaction (dbus-python only)
+if not USING_JEEPNEY_SHIM:
+    DBusGMainLoop(set_as_default=True)
 
 # Configuration will be loaded from Config module
 # These are module-level variables that will be set by initialize_from_config()
