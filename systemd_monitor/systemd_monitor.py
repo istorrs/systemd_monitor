@@ -26,6 +26,7 @@ from gi.repository import GLib  # pylint: disable=no-name-in-module
 
 from systemd_monitor.config import Config
 from systemd_monitor import __version__
+from systemd_monitor.prometheus_metrics import get_metrics
 
 # Set up DBusGMainLoop globally before any D-Bus interaction
 DBusGMainLoop(set_as_default=True)
@@ -188,7 +189,7 @@ def load_state() -> None:
         }
 
 
-def handle_properties_changed(
+def handle_properties_changed(  # pylint: disable=too-many-statements
     service_name: str, _interface: str, changed: Dict[str, Any], _invalidated: List[str]
 ) -> None:
     """
@@ -251,6 +252,8 @@ def handle_properties_changed(
             last_state_info["crashes"],
         )
         LOGGER.info(*log_message)
+        # Update Prometheus metrics
+        get_metrics().increment_starts(service_name)
 
     # 2. Detect a STOP or CRASH
     # Transition from a 'running-like' state to a 'stopped-like' state.
@@ -259,6 +262,8 @@ def handle_properties_changed(
     ):
         last_state_info["stops"] += 1
         counter_changed = True
+        # Update Prometheus stop counter
+        get_metrics().increment_stops(service_name)
         if current_active_state == "failed":
             last_state_info["crashes"] += 1
             log_message = (
@@ -275,6 +280,8 @@ def handle_properties_changed(
                 last_state_info["stops"],
             )
             LOGGER.error(*log_message)
+            # Update Prometheus crash counter
+            get_metrics().increment_crashes(service_name)
         else:  # It's a clean stop (inactive, dead)
             log_message = (
                 "Service %s: %s -> %s (STOP) - Starts: %d, Stops: %d, Crashes: %d",
@@ -311,6 +318,10 @@ def handle_properties_changed(
             last_state_info["crashes"],
         )
         LOGGER.info(*log_message)
+        # Update Prometheus restart counter
+        get_metrics().increment_restarts(service_name)
+        get_metrics().increment_stops(service_name)
+        get_metrics().increment_starts(service_name)
     else:
         log_message = (
             "Service %s: %s -> %s (SubState: %s)",
@@ -334,12 +345,17 @@ def handle_properties_changed(
     if current_active_state in ["active", "activating", "reloading"]:
         last_state_info["logged_unloaded"] = False
 
+    # Always update Prometheus state gauge and timestamp (even if counters didn't change)
+    get_metrics().update_service_state(
+        service_name, current_active_state, current_last_change_time / 1000000
+    )
+
     # Save state if counters were changed
     if counter_changed:
         save_state()
 
 
-def setup_dbus_monitor() -> bool:
+def setup_dbus_monitor() -> bool:  # noqa: C901
     """
     Set up D-Bus signal monitoring for service state changes.
 
@@ -403,6 +419,21 @@ def setup_dbus_monitor() -> bool:
                     )
                     SERVICE_STATES[service_name]["logged_unloaded"] = True
                 SERVICE_STATES[service_name]["last_state"] = "unloaded"
+
+        # Initialize Prometheus gauges from loaded state
+        metrics = get_metrics()
+        if metrics.enabled:
+            for service_name in MONITORED_SERVICES:
+                state = SERVICE_STATES[service_name]["last_state"]
+                # Use current time for initial timestamp
+                # (since we don't have exact microsecond time)
+                timestamp = time.time()
+                metrics.update_service_state(service_name, state, timestamp)
+                LOGGER.debug(
+                    "Initialized Prometheus gauge for %s: state=%s",
+                    service_name,
+                    state,
+                )
 
         for service_name in MONITORED_SERVICES:
             try:
@@ -606,7 +637,7 @@ def _handle_command_actions(
     return False
 
 
-def main() -> None:
+def main() -> None:  # noqa: C901
     """Main entry point for the systemd monitor."""
     parser = _create_argument_parser()
     args = parser.parse_args()
@@ -625,6 +656,23 @@ def main() -> None:
 
     log_file_path = args.log_file if args.log_file else app_config.log_file
     _setup_logging(log_file_path, app_config.debug)
+
+    # Initialize Prometheus metrics if enabled
+    if app_config.prometheus_enabled:
+        metrics = get_metrics()
+        if metrics.enabled:
+            if metrics.start_http_server(app_config.prometheus_port):
+                LOGGER.info(
+                    "Prometheus metrics enabled on port %d", app_config.prometheus_port
+                )
+                # Set monitor info
+                metrics.set_monitor_info(__version__, MONITORED_SERVICES)
+            else:
+                LOGGER.warning("Failed to start Prometheus HTTP server")
+        else:
+            LOGGER.info("Prometheus client not available, metrics disabled")
+    else:
+        LOGGER.info("Prometheus metrics disabled by configuration")
 
     if args.persistence_file:
         globals()["PERSISTENCE_FILE"] = args.persistence_file

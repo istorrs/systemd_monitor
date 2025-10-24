@@ -29,6 +29,8 @@ class Config:
         "stats_interval": 60,  # seconds
         "max_retries": 3,
         "debug": False,
+        "prometheus_enabled": True,
+        "prometheus_port": 9100,
     }
 
     def __init__(self, config_file: Optional[str] = None, **kwargs):
@@ -87,6 +89,16 @@ class Config:
         """Get debug mode setting."""
         return self.config["debug"]
 
+    @property
+    def prometheus_enabled(self) -> bool:
+        """Get Prometheus metrics enabled setting."""
+        return self.config["prometheus_enabled"]
+
+    @property
+    def prometheus_port(self) -> int:
+        """Get Prometheus HTTP server port."""
+        return self.config["prometheus_port"]
+
     def save_config(self, config_file: str):
         """Save current configuration to file."""
         try:
@@ -108,6 +120,16 @@ def parse_arguments() -> Optional[Config]:
     )
     parser.add_argument(
         "--stats-interval", type=int, help="Statistics generation interval in seconds"
+    )
+    parser.add_argument(
+        "--prometheus-port",
+        type=int,
+        help="Port for Prometheus metrics endpoint (default: 9100)",
+    )
+    parser.add_argument(
+        "--no-prometheus",
+        action="store_true",
+        help="Disable Prometheus metrics",
     )
     parser.add_argument(
         "--create-config", type=str, help="Create a default configuration file"
@@ -134,5 +156,9 @@ def parse_arguments() -> Optional[Config]:
         kwargs["poll_interval"] = args.poll_interval
     if args.stats_interval:
         kwargs["stats_interval"] = args.stats_interval
+    if args.no_prometheus:
+        kwargs["prometheus_enabled"] = False
+    if args.prometheus_port:
+        kwargs["prometheus_port"] = args.prometheus_port
 
     return Config(args.config, **kwargs)
