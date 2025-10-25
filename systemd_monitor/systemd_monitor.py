@@ -658,69 +658,48 @@ def _handle_command_actions(
     return False
 
 
-def main() -> (
-    None
-):  # noqa: C901  # pylint: disable=too-many-branches,too-many-statements
-    """Main entry point for the systemd monitor."""
-    parser = _create_argument_parser()
-    args = parser.parse_args()
-
-    # Initialize configuration
-    config_kwargs = {}
-    if args.debug:
-        config_kwargs["debug"] = True
-    if args.log_file:
-        config_kwargs["log_file"] = args.log_file
-    if args.services:
-        config_kwargs["monitored_services"] = args.services
-
-    app_config = Config(config_file=args.config, **config_kwargs)
-    initialize_from_config(app_config)
-
-    log_file_path = args.log_file if args.log_file else app_config.log_file
-    _setup_logging(log_file_path, app_config.debug)
-
-    # Initialize Prometheus metrics if enabled
-    if app_config.prometheus_enabled:
-        metrics = get_metrics()
-        if metrics.enabled:
-            if metrics.start_http_server(app_config.prometheus_port):
-                LOGGER.info(
-                    "Prometheus metrics enabled on port %d", app_config.prometheus_port
-                )
-                # Set monitor info
-                metrics.set_monitor_info(__version__, MONITORED_SERVICES)
-            else:
-                LOGGER.warning("Failed to start Prometheus HTTP server")
-        else:
-            LOGGER.info("Prometheus client not available, metrics disabled")
-    else:
+def _initialize_prometheus(app_config: Config) -> None:
+    """Initialize Prometheus metrics if enabled."""
+    if not app_config.prometheus_enabled:
         LOGGER.info("Prometheus metrics disabled by configuration")
+        return
 
-    if args.persistence_file:
-        globals()["PERSISTENCE_FILE"] = args.persistence_file
+    metrics = get_metrics()
+    if not metrics.enabled:
+        LOGGER.info("Prometheus client not available, metrics disabled")
+        return
 
-    _handle_command_actions(args, log_file_path)
+    if metrics.start_http_server(app_config.prometheus_port):
+        LOGGER.info("Prometheus metrics enabled on port %d", app_config.prometheus_port)
+        metrics.set_monitor_info(__version__, MONITORED_SERVICES)
+    else:
+        LOGGER.warning("Failed to start Prometheus HTTP server")
 
-    # Check if we have any services to monitor
-    if not MONITORED_SERVICES:
-        error_msg = (
-            "ERROR: No services configured for monitoring!\n"
-            "Please specify services using:\n"
-            "  --services SERVICE1,SERVICE2,...\n"
-            "Or create a config file with 'monitored_services' list.\n"
-            "Example: systemd-monitor --services sshd.service,cron.service"
-        )
-        print(error_msg, file=sys.stderr)
-        LOGGER.error("No services configured for monitoring")
-        for handler in LOGGER.handlers:
-            handler.flush()
-        sys.exit(1)
 
+def _validate_services_configured() -> None:
+    """Check that services are configured, exit with error if not."""
+    if MONITORED_SERVICES:
+        return
+
+    error_msg = (
+        "ERROR: No services configured for monitoring!\n"
+        "Please specify services using:\n"
+        "  --services SERVICE1,SERVICE2,...\n"
+        "Or create a config file with 'monitored_services' list.\n"
+        "Example: systemd-monitor --services sshd.service,cron.service"
+    )
+    print(error_msg, file=sys.stderr)
+    LOGGER.error("No services configured for monitoring")
+    for handler in LOGGER.handlers:
+        handler.flush()
+    sys.exit(1)
+
+
+def _start_monitoring(log_file_path: str) -> None:
+    """Start D-Bus monitoring or exit with error."""
     LOGGER.info("Starting D-Bus monitoring for %d services...", len(MONITORED_SERVICES))
     LOGGER.debug("Services: %s", ", ".join(MONITORED_SERVICES))
 
-    # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
@@ -740,6 +719,36 @@ def main() -> (
         f"Monitoring {len(MONITORED_SERVICES)} services. Press Ctrl+C to stop.",
         file=sys.stderr,
     )
+
+
+def main() -> None:
+    """Main entry point for the systemd monitor."""
+    parser = _create_argument_parser()
+    args = parser.parse_args()
+
+    # Initialize configuration
+    config_kwargs = {}
+    if args.debug:
+        config_kwargs["debug"] = True
+    if args.log_file:
+        config_kwargs["log_file"] = args.log_file
+    if args.services:
+        config_kwargs["monitored_services"] = args.services
+
+    app_config = Config(config_file=args.config, **config_kwargs)
+    initialize_from_config(app_config)
+
+    log_file_path = args.log_file if args.log_file else app_config.log_file
+    _setup_logging(log_file_path, app_config.debug)
+
+    _initialize_prometheus(app_config)
+
+    if args.persistence_file:
+        globals()["PERSISTENCE_FILE"] = args.persistence_file
+
+    _handle_command_actions(args, log_file_path)
+    _validate_services_configured()
+    _start_monitoring(log_file_path)
 
     # Block main thread until shutdown event is set
     # The Jeepney event loop runs in a background thread

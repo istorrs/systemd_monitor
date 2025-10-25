@@ -479,7 +479,8 @@ class TestInterface:
 
         result = interface.Subscribe()
 
-        assert result is None
+        # Void methods should return empty tuple, not None
+        assert result == ()
         call_args = mock_jeepney.new_method_call.call_args[0]
         assert call_args[1] == "Subscribe"
         assert call_args[2] == ""

@@ -294,7 +294,13 @@ class Interface:
                     args if args else None,
                 )
                 reply = self.proxy_obj.conn.send_and_get_reply(msg)
-                return reply.body[0] if reply.body else None
+                # Return empty tuple for void methods, single value for single returns,
+                # or full tuple for multiple returns
+                if not reply.body:
+                    return ()  # Void method
+                if len(reply.body) == 1:
+                    return reply.body[0]  # Single return value
+                return reply.body  # Multiple return values
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 raise DBusException(f"{method_name} failed: {exc}") from exc
 
