@@ -3,8 +3,7 @@ Service Monitor for systemd units.
 
 This script monitors a predefined list of systemd services using D-Bus,
 logging their state changes, starts, stops, and crashes to a file.
-It uses GLib.MainLoop for event handling and argparse for command-line
-argument parsing.
+It uses pure Python Jeepney library for D-Bus communication (no C compiler required).
 Counters for starts, stops, and crashes are persisted across script runs
 using a JSON file.
 """
@@ -17,39 +16,15 @@ import signal
 import sys
 import json
 import os
-from functools import partial  # Used for signal_handler binding
+import threading
 from typing import Dict, Any, Optional, List
 
-# Try to import dbus-python first (requires C compiler)
-# Fall back to pure-Python Jeepney shim if unavailable
-try:
-    import dbus
-    from dbus.mainloop.glib import DBusGMainLoop
+# Use pure-Python Jeepney for D-Bus (no C compiler required)
+from systemd_monitor import dbus_shim as dbus  # type: ignore
 
-    USING_JEEPNEY_SHIM = False
-    LOGGER_TEMP = logging.getLogger(__name__)
-    LOGGER_TEMP.info("Using dbus-python for D-Bus communication")
-except ImportError:
-    # dbus-python not available, use Jeepney shim
-    # pylint: disable=ungrouped-imports
-    from systemd_monitor import dbus_shim as dbus  # type: ignore
-
-    USING_JEEPNEY_SHIM = True
-    LOGGER_TEMP = logging.getLogger(__name__)
-    LOGGER_TEMP.info("Using Jeepney shim for D-Bus communication (pure Python)")
-
-# Import GLib for event loop
-# pylint: disable=no-name-in-module,wrong-import-position
-from gi.repository import GLib
-
-# pylint: disable=wrong-import-position
 from systemd_monitor.config import Config
 from systemd_monitor import __version__
 from systemd_monitor.prometheus_metrics import get_metrics
-
-# Set up DBusGMainLoop globally before any D-Bus interaction (dbus-python only)
-if not USING_JEEPNEY_SHIM:
-    DBusGMainLoop(set_as_default=True)
 
 # Configuration will be loaded from Config module
 # These are module-level variables that will be set by initialize_from_config()
@@ -70,6 +45,9 @@ SYSTEMD_MANAGER_INTERFACE = "org.freedesktop.systemd1.Manager"
 SYSTEMD_UNIT_INTERFACE = "org.freedesktop.systemd1.Unit"
 SYSTEMD_SERVICE_INTERFACE = "org.freedesktop.systemd1.Service"
 SYSTEMD_PROPERTIES_INTERFACE = "org.freedesktop.DBus.Properties"
+
+# Global shutdown event for graceful termination
+SHUTDOWN_EVENT = threading.Event()
 
 # Initialize D-Bus connection
 SYSTEM_BUS = dbus.SystemBus()
@@ -528,7 +506,7 @@ def initialize_from_config(config: Config) -> None:
     LOGGER.info("Initialized with %d monitored services", len(MONITORED_SERVICES))
 
 
-def signal_handler(_sig: int, _frame: Any, main_loop: GLib.MainLoop) -> None:
+def signal_handler(_sig: int, _frame: Any) -> None:
     """
     Handle termination signals with cleanup. Saves state before exiting.
     """
@@ -549,7 +527,8 @@ def signal_handler(_sig: int, _frame: Any, main_loop: GLib.MainLoop) -> None:
     for handler in LOGGER.handlers:
         handler.flush()
 
-    main_loop.quit()
+    # Signal the main thread to exit
+    SHUTDOWN_EVENT.set()
     sys.exit(0)
 
 
@@ -699,19 +678,20 @@ def main() -> None:  # noqa: C901
 
     _handle_command_actions(args, log_file_path)
 
-    main_loop = GLib.MainLoop()
-
-    signal.signal(signal.SIGINT, partial(signal_handler, main_loop=main_loop))
-    signal.signal(signal.SIGTERM, partial(signal_handler, main_loop=main_loop))
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     if setup_dbus_monitor():
         LOGGER.error("D-Bus monitoring setup failed. Exiting.")
         sys.exit(1)
 
+    # Block main thread until shutdown event is set
+    # The Jeepney event loop runs in a background thread
     try:
-        main_loop.run()
+        SHUTDOWN_EVENT.wait()
     except KeyboardInterrupt:
-        signal_handler(signal.SIGINT, None, main_loop)
+        signal_handler(signal.SIGINT, None)
 
 
 if __name__ == "__main__":

@@ -1,29 +1,26 @@
 """
 Unit tests for systemd_monitor module.
 
-These are proper unit tests that mock dbus and GLib dependencies,
+These are proper unit tests that mock D-Bus dependencies,
 allowing tests to run in any environment without requiring actual
 dbus/systemd installation.
 """
 
 # pylint: disable=import-error,attribute-defined-outside-init
 # pylint: disable=import-outside-toplevel,protected-access,too-few-public-methods
-# pylint: disable=too-many-lines  # Test files can be long for comprehensive coverage
+# pylint: disable=too-many-lines,invalid-name  # Test files can be long for comprehensive coverage
 import sys
 import os
 import json
 import signal
 from unittest.mock import patch, MagicMock, mock_open
 
+import pytest
+
 
 # Create a proper DBusException class that can be caught
 class MockDBusException(Exception):
     """Mock DBus exception for testing."""
-
-
-# Mock dbus and GLib BEFORE importing systemd_monitor
-# This allows tests to run without dbus-python installed
-mock_dbus = MagicMock()
 
 
 # Create a mock exceptions module with our real exception class
@@ -33,16 +30,22 @@ class MockDBusExceptionsModule:
     DBusException = MockDBusException
 
 
-mock_dbus_exceptions = MockDBusExceptionsModule()
-mock_dbus.exceptions = mock_dbus_exceptions
+# Mock dbus_shim BEFORE importing systemd_monitor
+# This allows tests to run without real D-Bus connection
+# Create a real module-like object instead of MagicMock for proper attribute access
+class MockDBusShimModule:
+    """Mock dbus_shim module."""
 
-sys.modules["dbus"] = mock_dbus
-sys.modules["dbus.mainloop"] = MagicMock()
-sys.modules["dbus.mainloop.glib"] = MagicMock()
-sys.modules["dbus.exceptions"] = mock_dbus_exceptions
-sys.modules["gi"] = MagicMock()
-sys.modules["gi.repository"] = MagicMock()
-sys.modules["gi.repository.GLib"] = MagicMock()
+    SystemBus = MagicMock
+    ProxyObject = MagicMock
+    Interface = MagicMock
+    DBusException = MockDBusException
+    get_system_bus = MagicMock
+    exceptions = MockDBusExceptionsModule()
+
+
+mock_dbus_shim = MockDBusShimModule()
+sys.modules["systemd_monitor.dbus_shim"] = mock_dbus_shim
 
 # Now we can safely import systemd_monitor
 # pylint: disable=wrong-import-position
@@ -651,37 +654,36 @@ class TestSignalHandler:
 
     def test_signal_handler_saves_state(self):
         """Test that signal handler saves state before exiting."""
-        mock_loop = MagicMock()
-
         with patch.object(systemd_monitor, "save_state") as mock_save, patch.object(
             systemd_monitor, "MANAGER_INTERFACE"
         ), patch.object(systemd_monitor, "SYSTEM_BUS"), patch.object(
             systemd_monitor, "LOGGER"
-        ), patch(
+        ), patch.object(
+            systemd_monitor, "SHUTDOWN_EVENT"
+        ) as mock_event, patch(
             "sys.exit"
         ) as mock_exit:
-            systemd_monitor.signal_handler(signal.SIGINT, None, mock_loop)
+            systemd_monitor.signal_handler(signal.SIGINT, None)
             mock_save.assert_called_once()
-            mock_loop.quit.assert_called_once()
+            mock_event.set.assert_called_once()
             mock_exit.assert_called_once_with(0)
 
     def test_signal_handler_unsubscribes(self):
         """Test that signal handler unsubscribes from D-Bus."""
-        mock_loop = MagicMock()
-
         with patch.object(systemd_monitor, "save_state"), patch.object(
             systemd_monitor, "MANAGER_INTERFACE"
         ) as mock_manager, patch.object(systemd_monitor, "SYSTEM_BUS"), patch.object(
             systemd_monitor, "LOGGER"
+        ), patch.object(
+            systemd_monitor, "SHUTDOWN_EVENT"
         ), patch(
             "sys.exit"
         ):
-            systemd_monitor.signal_handler(signal.SIGINT, None, mock_loop)
+            systemd_monitor.signal_handler(signal.SIGINT, None)
             mock_manager.Unsubscribe.assert_called_once()
 
     def test_signal_handler_handles_unsub_error(self):
         """Test that signal handler handles unsubscribe errors."""
-        mock_loop = MagicMock()
         # Use the MockDBusException
         mock_exception = MockDBusException("Failed to unsubscribe")
 
@@ -689,27 +691,29 @@ class TestSignalHandler:
             systemd_monitor, "MANAGER_INTERFACE"
         ) as mock_manager, patch.object(systemd_monitor, "SYSTEM_BUS"), patch.object(
             systemd_monitor.LOGGER, "warning"
-        ) as mock_logger, patch(
+        ) as mock_logger, patch.object(
+            systemd_monitor, "SHUTDOWN_EVENT"
+        ), patch(
             "sys.exit"
         ):
             mock_manager.Unsubscribe.side_effect = mock_exception
-            systemd_monitor.signal_handler(signal.SIGINT, None, mock_loop)
+            systemd_monitor.signal_handler(signal.SIGINT, None)
             # Should log warning but still exit
             assert mock_logger.called
 
     def test_signal_handler_handles_bus_close_error(self):
         """Test that signal handler handles SYSTEM_BUS close errors."""
-        mock_loop = MagicMock()
-
         with patch.object(systemd_monitor, "save_state"), patch.object(
             systemd_monitor, "MANAGER_INTERFACE"
         ), patch.object(systemd_monitor, "SYSTEM_BUS") as mock_bus, patch.object(
             systemd_monitor.LOGGER, "error"
-        ) as mock_logger, patch(
+        ) as mock_logger, patch.object(
+            systemd_monitor, "SHUTDOWN_EVENT"
+        ), patch(
             "sys.exit"
         ):
             mock_bus.close.side_effect = Exception("Failed to close bus")
-            systemd_monitor.signal_handler(signal.SIGINT, None, mock_loop)
+            systemd_monitor.signal_handler(signal.SIGINT, None)
             # Should log error but still exit gracefully
             assert mock_logger.called
 
@@ -884,17 +888,13 @@ class TestMainFunction:
             systemd_monitor, "_handle_command_actions", return_value=False
         ), patch.object(
             systemd_monitor, "setup_dbus_monitor", return_value=False
-        ), patch(
-            "systemd_monitor.systemd_monitor.GLib.MainLoop"
-        ) as mock_mainloop, patch(
+        ), patch.object(
+            systemd_monitor, "SHUTDOWN_EVENT"
+        ) as mock_event, patch(
             "signal.signal"
         ):
-            # Mock the main loop to avoid actually running
-            mock_loop_instance = MagicMock()
-            mock_mainloop.return_value = mock_loop_instance
-
-            # Mock run() to raise KeyboardInterrupt to exit cleanly
-            mock_loop_instance.run.side_effect = KeyboardInterrupt()
+            # Mock wait() to raise KeyboardInterrupt to exit cleanly
+            mock_event.wait.side_effect = KeyboardInterrupt()
 
             with patch.object(systemd_monitor, "signal_handler"), patch("sys.exit"):
                 try:
@@ -919,10 +919,17 @@ class TestMainFunction:
             systemd_monitor, "setup_dbus_monitor", return_value=True
         ), patch.object(
             systemd_monitor.LOGGER, "error"
-        ) as mock_logger, patch(
+        ) as mock_logger, patch.object(
+            systemd_monitor, "signal_handler"
+        ), patch(
             "sys.exit"
         ) as mock_exit:
-            systemd_monitor.main()
+            # Make sys.exit raise SystemExit to actually stop execution
+            mock_exit.side_effect = SystemExit(1)
+
+            with pytest.raises(SystemExit):
+                systemd_monitor.main()
+
             # Should log error and exit with code 1
             assert mock_logger.called
             mock_exit.assert_called_once_with(1)
@@ -947,15 +954,13 @@ class TestMainFunction:
             systemd_monitor, "_handle_command_actions", return_value=False
         ), patch.object(
             systemd_monitor, "setup_dbus_monitor", return_value=False
-        ), patch(
-            "systemd_monitor.systemd_monitor.GLib.MainLoop"
-        ) as mock_mainloop, patch(
+        ), patch.object(
+            systemd_monitor, "SHUTDOWN_EVENT"
+        ) as mock_event, patch(
             "signal.signal"
         ):
-            # Mock the main loop to avoid actually running
-            mock_loop_instance = MagicMock()
-            mock_mainloop.return_value = mock_loop_instance
-            mock_loop_instance.run.side_effect = KeyboardInterrupt()
+            # Mock wait() to raise KeyboardInterrupt to exit cleanly
+            mock_event.wait.side_effect = KeyboardInterrupt()
 
             with patch.object(systemd_monitor, "signal_handler"), patch("sys.exit"):
                 try:
