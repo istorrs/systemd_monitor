@@ -20,7 +20,6 @@ Performance: ~5-10x slower than dbus-python but sufficient for systemd monitorin
 import logging
 import select
 import threading
-import time
 from typing import Callable, Optional, Dict, Any
 
 try:
@@ -190,7 +189,6 @@ class _SystemBus:
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 if self._running:  # Only log if not shutting down
                     LOGGER.debug("Event loop error: %s", exc)
-                time.sleep(0.1)  # Avoid tight loop on errors
 
 
 class ProxyObject:  # pylint: disable=too-few-public-methods
