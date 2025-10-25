@@ -923,6 +923,37 @@ class TestMainFunction:
                 # Verify setup_logging was called
                 assert mock_setup_log.called
 
+    def test_main_exits_on_empty_services(self):
+        """Test that main exits when no services are configured."""
+        test_args = ["prog", "--debug"]  # No --services argument
+
+        with patch("sys.argv", test_args), patch.object(
+            systemd_monitor, "initialize_from_config"
+        ), patch.object(systemd_monitor, "_setup_logging"), patch.object(
+            systemd_monitor, "_handle_command_actions", return_value=False
+        ), patch.object(
+            systemd_monitor, "MONITORED_SERVICES", []
+        ), patch.object(
+            systemd_monitor.LOGGER, "error"
+        ) as mock_logger, patch(
+            "builtins.print"
+        ) as mock_print, patch(
+            "sys.exit"
+        ) as mock_exit:
+            # Make sys.exit raise SystemExit to actually stop execution
+            mock_exit.side_effect = SystemExit(1)
+
+            with pytest.raises(SystemExit):
+                systemd_monitor.main()
+
+            # Verify error was logged and printed
+            assert mock_logger.called
+            assert mock_print.called
+            # Check that helpful error message was printed
+            print_call_args = str(mock_print.call_args)
+            assert "No services configured" in print_call_args
+            mock_exit.assert_called_once_with(1)
+
     def test_main_exits_on_dbus_setup_failure(self):
         """Test that main exits when D-Bus setup fails."""
         test_args = ["prog", "--services", "test.service"]

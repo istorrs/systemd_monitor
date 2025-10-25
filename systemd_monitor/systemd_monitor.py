@@ -353,7 +353,7 @@ def handle_properties_changed(  # pylint: disable=too-many-statements
         save_state()
 
 
-def setup_dbus_monitor() -> bool:  # noqa: C901
+def setup_dbus_monitor() -> bool:  # noqa: C901 # pylint: disable=too-many-statements
     """
     Set up D-Bus signal monitoring for service state changes.
 
@@ -363,8 +363,11 @@ def setup_dbus_monitor() -> bool:  # noqa: C901
     Returns:
         bool: True if D-Bus monitoring setup failed, False otherwise.
     """
+    LOGGER.debug("Setting up D-Bus monitoring for %d services", len(MONITORED_SERVICES))
+
     # Load persistent states first
     load_state()
+    LOGGER.debug("Loaded persistent state for %d services", len(SERVICE_STATES))
 
     try:
         # First, ensure systemd will emit signals to us
@@ -457,7 +460,26 @@ def setup_dbus_monitor() -> bool:  # noqa: C901
 
     except dbus.exceptions.DBusException as exc:
         LOGGER.error("Failed to set up D-Bus monitoring: %s", exc)
+        LOGGER.error("Exception type: %s", type(exc).__name__)
+        LOGGER.error(
+            "This may indicate:\n"
+            "  - D-Bus service is not running (check: systemctl status dbus)\n"
+            "  - Insufficient permissions (try running as root)\n"
+            "  - systemd is not available on this system"
+        )
+        print(f"ERROR: D-Bus connection failed: {exc}", file=sys.stderr)
         return True
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        # Intentionally broad to catch any unexpected errors during setup
+        LOGGER.error("Unexpected error during D-Bus setup: %s", exc)
+        LOGGER.error("Exception type: %s", type(exc).__name__)
+        import traceback  # pylint: disable=import-outside-toplevel
+
+        LOGGER.error("Traceback:\n%s", traceback.format_exc())
+        print(f"ERROR: Unexpected error: {exc}", file=sys.stderr)
+        return True
+
+    LOGGER.debug("D-Bus monitoring setup completed successfully")
     return False
 
 
@@ -636,7 +658,9 @@ def _handle_command_actions(
     return False
 
 
-def main() -> None:  # noqa: C901
+def main() -> (
+    None
+):  # noqa: C901  # pylint: disable=too-many-branches,too-many-statements
     """Main entry point for the systemd monitor."""
     parser = _create_argument_parser()
     args = parser.parse_args()
@@ -678,13 +702,44 @@ def main() -> None:  # noqa: C901
 
     _handle_command_actions(args, log_file_path)
 
+    # Check if we have any services to monitor
+    if not MONITORED_SERVICES:
+        error_msg = (
+            "ERROR: No services configured for monitoring!\n"
+            "Please specify services using:\n"
+            "  --services SERVICE1,SERVICE2,...\n"
+            "Or create a config file with 'monitored_services' list.\n"
+            "Example: systemd-monitor --services sshd.service,cron.service"
+        )
+        print(error_msg, file=sys.stderr)
+        LOGGER.error("No services configured for monitoring")
+        for handler in LOGGER.handlers:
+            handler.flush()
+        sys.exit(1)
+
+    LOGGER.info("Starting D-Bus monitoring for %d services...", len(MONITORED_SERVICES))
+    LOGGER.debug("Services: %s", ", ".join(MONITORED_SERVICES))
+
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
     if setup_dbus_monitor():
+        error_msg = (
+            "ERROR: D-Bus monitoring setup failed!\n"
+            f"Check {log_file_path} for details."
+        )
+        print(error_msg, file=sys.stderr)
         LOGGER.error("D-Bus monitoring setup failed. Exiting.")
+        for handler in LOGGER.handlers:
+            handler.flush()
         sys.exit(1)
+
+    LOGGER.info("D-Bus monitoring active. Press Ctrl+C to stop.")
+    print(
+        f"Monitoring {len(MONITORED_SERVICES)} services. Press Ctrl+C to stop.",
+        file=sys.stderr,
+    )
 
     # Block main thread until shutdown event is set
     # The Jeepney event loop runs in a background thread
