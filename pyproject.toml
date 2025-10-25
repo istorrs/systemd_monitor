@@ -7,14 +7,13 @@ name = "systemd_monitor"
 dynamic = ["version"]
 description = "A Python package for monitoring systemd services via D-Bus"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "Your Name", email = "your.email@example.com"}
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.7",
@@ -27,14 +26,17 @@ classifiers = [
 ]
 requires-python = ">=3.7"
 dependencies = [
-    "dbus-python>=1.2.0",
-    "PyGObject>=3.36.0",
+    "jeepney>=0.8.0",
 ]
 
 [project.optional-dependencies]
+metrics = [
+    "prometheus-client>=0.14.0",
+]
 dev = [
     "pytest>=6.0",
     "pytest-cov>=2.0",
+    "pytest-mock>=3.6.0",
     "black>=21.0",
     "flake8>=3.8",
     "mypy>=0.800",
@@ -43,6 +45,15 @@ dev = [
 
 [project.scripts]
 systemd-monitor = "systemd_monitor.systemd_monitor:main"
+
+[tool.setuptools]
+packages = ["systemd_monitor"]
+
+[tool.setuptools.package-data]
+systemd_monitor = ["py.typed"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["tests*", "venv*", "htmlcov*", "junit*", "*.egg-info*"]
 
 [tool.black]
 line-length = 88
