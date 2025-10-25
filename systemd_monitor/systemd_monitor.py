@@ -103,9 +103,9 @@ def save_state() -> None:
             json.dump(serializable_states, f, indent=4)
         LOGGER.debug("Service states saved to %s", PERSISTENCE_FILE)
     except IOError as e:
-        LOGGER.error("Error saving service states to %s: %s", PERSISTENCE_FILE, e)
+        LOGGER.exception("Error saving service states to %s: %s", PERSISTENCE_FILE, e)
     except TypeError as e:
-        LOGGER.error("Error serializing service states (check data types): %s", e)
+        LOGGER.exception("Error serializing service states (check data types): %s", e)
 
 
 def load_state() -> None:
@@ -168,7 +168,7 @@ def load_state() -> None:
             LOGGER.info("Removed unmonitored service from state: %s", service)
 
     except (IOError, json.JSONDecodeError) as e:
-        LOGGER.error(
+        LOGGER.exception(
             "Error loading service states from %s: %s. Initializing with default states.",
             PERSISTENCE_FILE,
             e,
@@ -459,7 +459,7 @@ def setup_dbus_monitor() -> bool:  # noqa: C901 # pylint: disable=too-many-state
                 )
 
     except dbus.exceptions.DBusException as exc:
-        LOGGER.error("Failed to set up D-Bus monitoring: %s", exc)
+        LOGGER.exception("Failed to set up D-Bus monitoring: %s", exc)
         LOGGER.error("Exception type: %s", type(exc).__name__)
         LOGGER.error(
             "This may indicate:\n"
@@ -471,7 +471,7 @@ def setup_dbus_monitor() -> bool:  # noqa: C901 # pylint: disable=too-many-state
         return True
     except Exception as exc:  # pylint: disable=broad-exception-caught
         # Intentionally broad to catch any unexpected errors during setup
-        LOGGER.error("Unexpected error during D-Bus setup: %s", exc)
+        LOGGER.exception("Unexpected error during D-Bus setup: %s", exc)
         LOGGER.error("Exception type: %s", type(exc).__name__)
         import traceback  # pylint: disable=import-outside-toplevel
 
@@ -508,6 +508,8 @@ def _get_initial_service_properties(service_name: str) -> Optional[Dict[str, Any
             "StateChangeTimestamp": int(state_change_timestamp),
         }
     except dbus.exceptions.DBusException:
+        LOGGER.exception("Failed to set up D-Bus monitoring: %s", exc)
+        LOGGER.error("Exception type: %s", type(exc).__name__)
         return None
 
 
@@ -539,11 +541,11 @@ def signal_handler(_sig: int, _frame: Any) -> None:
         MANAGER_INTERFACE.Unsubscribe()  # Unsubscribe from global systemd signals
         LOGGER.info("Successfully unsubscribed from systemd D-Bus signals.")
     except dbus.exceptions.DBusException as exc:
-        LOGGER.warning("Failed to unsubscribe from D-Bus: %s", exc)
+        LOGGER.exception("Failed to unsubscribe from D-Bus: %s", exc)
     try:
         SYSTEM_BUS.close()
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        LOGGER.error("Failed to close D-Bus connection: %s", exc)
+        LOGGER.exception("Failed to close D-Bus connection: %s", exc)
 
     # Ensure logs are flushed before exiting
     for handler in LOGGER.handlers:
