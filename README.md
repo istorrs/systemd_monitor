@@ -242,7 +242,7 @@ This monitor uses **Jeepney**, a pure Python D-Bus library, making it perfect fo
 
 ### Performance Note
 
-Jeepney is ~5-10x slower than dbus-python (C extension), but this is negligible for monitoring typical service counts (10-100 services). The event-driven architecture ensures efficient resource usage regardless of implementation.
+Jeepney is a pure Python implementation, which means it's slightly slower than C-based D-Bus libraries, but this is negligible for monitoring typical service counts (10-100 services). The event-driven architecture ensures efficient resource usage even with dozens of monitored services.
 
 ## Installation
 

@@ -206,7 +206,7 @@ sudo journalctl -u systemd-monitor -f
 
 2. Verify Python dependencies:
    ```bash
-   python3 -c "import dbus; import gi.repository.GLib"
+   python3 -c "import jeepney"
    ```
 
 3. Check configuration file syntax:
