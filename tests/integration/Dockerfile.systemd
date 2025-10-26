@@ -34,6 +34,9 @@ RUN rm -f /lib/systemd/system/multi-user.target.wants/* \
 COPY . /app
 WORKDIR /app
 
+# Upgrade pip and setuptools (Ubuntu 22.04 ships with old versions)
+RUN pip3 install --no-cache-dir --upgrade pip setuptools
+
 # Install Python dependencies
 RUN pip3 install --no-cache-dir jeepney prometheus-client requests
 
