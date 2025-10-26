@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     dbus \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Configure systemd to run in container
