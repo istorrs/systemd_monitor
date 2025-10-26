@@ -24,23 +24,20 @@ from pathlib import Path
 
 class Colors:
     """ANSI color codes for output."""
-    GREEN = '\033[92m'
-    RED = '\033[91m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    RESET = '\033[0m'
-    BOLD = '\033[1m'
+
+    GREEN = "\033[92m"
+    RED = "\033[91m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
 
 
 def run_cmd(cmd, check=True, capture=True):
     """Run shell command and return output."""
     print(f"  $ {cmd}")
     result = subprocess.run(
-        cmd,
-        shell=True,
-        check=check,
-        capture_output=capture,
-        text=True
+        cmd, shell=True, check=check, capture_output=capture, text=True
     )
     if capture and result.stdout:
         print(f"    {result.stdout.strip()}")
@@ -53,7 +50,7 @@ def wait_for_log_entry(log_file, pattern, timeout=10, description=""):
     start = time.time()
     while time.time() - start < timeout:
         if os.path.exists(log_file):
-            with open(log_file, 'r') as f:
+            with open(log_file, "r") as f:
                 content = f.read()
                 if pattern in content:
                     print(f"    {Colors.GREEN}✓ Found: {pattern}{Colors.RESET}")
@@ -69,8 +66,8 @@ def get_prometheus_metric(metric_name, service_name=None, port=9100):
         resp = requests.get(f"http://localhost:{port}/metrics", timeout=5)
         resp.raise_for_status()
 
-        for line in resp.text.split('\n'):
-            if line.startswith('#'):
+        for line in resp.text.split("\n"):
+            if line.startswith("#"):
                 continue
             if metric_name in line:
                 if service_name is None or f'service="{service_name}"' in line:
@@ -94,7 +91,12 @@ def main():
     # Configuration
     log_file = "/tmp/systemd_monitor_integration.log"
     persistence_file = "/tmp/integration_test_state.json"
-    test_services = ["stable.service", "flaky.service", "restart.service", "oneshot.service"]
+    test_services = [
+        "stable.service",
+        "flaky.service",
+        "restart.service",
+        "oneshot.service",
+    ]
     monitor_pid_file = "/tmp/monitor.pid"
 
     # Clean up from previous runs
@@ -151,11 +153,13 @@ def main():
 
         # Verify monitor is running
         if os.path.exists(monitor_pid_file):
-            with open(monitor_pid_file, 'r') as f:
+            with open(monitor_pid_file, "r") as f:
                 monitor_pid = f.read().strip()
             result = run_cmd(f"ps -p {monitor_pid}", check=False)
             if result.returncode == 0:
-                print(f"  {Colors.GREEN}✓ Monitor started (PID: {monitor_pid}){Colors.RESET}")
+                print(
+                    f"  {Colors.GREEN}✓ Monitor started (PID: {monitor_pid}){Colors.RESET}"
+                )
                 tests_passed += 1
             else:
                 print(f"  {Colors.RED}✗ Monitor process not running{Colors.RESET}")
@@ -169,7 +173,9 @@ def main():
         # Test 4: Verify initial service states logged
         print(f"\n{Colors.BLUE}Test 4: Verify initial state detection{Colors.RESET}")
         time.sleep(2)
-        if wait_for_log_entry(log_file, "Initial state for", timeout=5, description="initial states"):
+        if wait_for_log_entry(
+            log_file, "Initial state for", timeout=5, description="initial states"
+        ):
             print(f"  {Colors.GREEN}✓ Initial states logged{Colors.RESET}")
             tests_passed += 1
         else:
@@ -179,8 +185,12 @@ def main():
         # Test 5: Test service START
         print(f"\n{Colors.BLUE}Test 5: Detect service START{Colors.RESET}")
         run_cmd("systemctl start stable.service")
-        if wait_for_log_entry(log_file, "stable.service", timeout=5, description="stable.service start"):
-            if wait_for_log_entry(log_file, "START", timeout=2, description="START event"):
+        if wait_for_log_entry(
+            log_file, "stable.service", timeout=5, description="stable.service start"
+        ):
+            if wait_for_log_entry(
+                log_file, "START", timeout=2, description="START event"
+            ):
                 print(f"  {Colors.GREEN}✓ Service START detected{Colors.RESET}")
                 tests_passed += 1
             else:
@@ -223,8 +233,15 @@ def main():
         time.sleep(3)  # Wait for crash and restart
 
         # Should see both crash and restart events
-        if wait_for_log_entry(log_file, "restart.service", timeout=5, description="restart.service activity"):
-            print(f"  {Colors.GREEN}✓ Auto-restart service activity detected{Colors.RESET}")
+        if wait_for_log_entry(
+            log_file,
+            "restart.service",
+            timeout=5,
+            description="restart.service activity",
+        ):
+            print(
+                f"  {Colors.GREEN}✓ Auto-restart service activity detected{Colors.RESET}"
+            )
             tests_passed += 1
         else:
             print(f"  {Colors.RED}✗ Auto-restart not detected{Colors.RESET}")
@@ -237,7 +254,7 @@ def main():
         # Test 9: Verify state persistence
         print(f"\n{Colors.BLUE}Test 9: Verify state persistence{Colors.RESET}")
         if os.path.exists(persistence_file):
-            with open(persistence_file, 'r') as f:
+            with open(persistence_file, "r") as f:
                 state = json.load(f)
 
             print(f"  Persisted state for {len(state)} services")
@@ -255,7 +272,9 @@ def main():
                     print(f"  {Colors.RED}✗ Counters not updated{Colors.RESET}")
                     tests_failed += 1
             else:
-                print(f"  {Colors.RED}✗ stable.service not in persisted state{Colors.RESET}")
+                print(
+                    f"  {Colors.RED}✗ stable.service not in persisted state{Colors.RESET}"
+                )
                 tests_failed += 1
         else:
             print(f"  {Colors.RED}✗ Persistence file not created{Colors.RESET}")
@@ -266,7 +285,9 @@ def main():
         time.sleep(2)  # Give metrics time to update
 
         # Check if metrics endpoint is available
-        starts_metric = get_prometheus_metric("systemd_service_starts_total", "stable.service")
+        starts_metric = get_prometheus_metric(
+            "systemd_service_starts_total", "stable.service"
+        )
         if starts_metric is not None:
             print(f"  stable.service starts: {starts_metric}")
             if starts_metric > 0:
@@ -276,15 +297,19 @@ def main():
                 print(f"  {Colors.YELLOW}⚠ Metric exists but value is 0{Colors.RESET}")
                 tests_passed += 1  # Still pass, might be timing
         else:
-            print(f"  {Colors.YELLOW}⚠ Prometheus metrics not available (optional){Colors.RESET}")
+            print(
+                f"  {Colors.YELLOW}⚠ Prometheus metrics not available (optional){Colors.RESET}"
+            )
             # Don't fail - metrics are optional
             tests_passed += 1
 
         # Test 11: Monitor restart and state reload
-        print(f"\n{Colors.BLUE}Test 11: Test monitor restart and state reload{Colors.RESET}")
+        print(
+            f"\n{Colors.BLUE}Test 11: Test monitor restart and state reload{Colors.RESET}"
+        )
 
         # Stop the monitor
-        with open(monitor_pid_file, 'r') as f:
+        with open(monitor_pid_file, "r") as f:
             monitor_pid = f.read().strip()
         run_cmd(f"kill -SIGTERM {monitor_pid}", check=False)
         time.sleep(2)
@@ -298,16 +323,20 @@ def main():
         time.sleep(3)
 
         # Verify it loaded the previous state
-        if wait_for_log_entry(log_file, "Loaded persistent state", timeout=5, description="state reload"):
+        if wait_for_log_entry(
+            log_file, "Loaded persistent state", timeout=5, description="state reload"
+        ):
             print(f"  {Colors.GREEN}✓ Monitor restarted and loaded state{Colors.RESET}")
             tests_passed += 1
         else:
-            print(f"  {Colors.YELLOW}⚠ State reload message not found (may still work){Colors.RESET}")
+            print(
+                f"  {Colors.YELLOW}⚠ State reload message not found (may still work){Colors.RESET}"
+            )
             tests_passed += 1  # Don't fail on log message
 
         # Test 12: Graceful shutdown
         print(f"\n{Colors.BLUE}Test 12: Test graceful shutdown{Colors.RESET}")
-        with open(monitor_pid_file, 'r') as f:
+        with open(monitor_pid_file, "r") as f:
             monitor_pid = f.read().strip()
 
         run_cmd(f"kill -SIGTERM {monitor_pid}", check=False)
@@ -325,6 +354,7 @@ def main():
     except Exception as e:
         print(f"\n{Colors.RED}Exception during test: {e}{Colors.RESET}")
         import traceback
+
         traceback.print_exc()
         tests_failed += 1
 
@@ -334,7 +364,7 @@ def main():
 
         # Stop monitor if still running
         if os.path.exists(monitor_pid_file):
-            with open(monitor_pid_file, 'r') as f:
+            with open(monitor_pid_file, "r") as f:
                 pid = f.read().strip()
             run_cmd(f"kill -9 {pid} 2>/dev/null || true", check=False)
 
