@@ -371,11 +371,17 @@ def setup_dbus_monitor() -> bool:  # noqa: C901 # pylint: disable=too-many-state
 
     try:
         # First, ensure systemd will emit signals to us
+        LOGGER.debug("About to call MANAGER_INTERFACE.Subscribe()...")
         MANAGER_INTERFACE.Subscribe()
         LOGGER.info("Successfully subscribed to systemd D-Bus signals.")
 
         # Initial logging of service states
+        LOGGER.debug(
+            "Fetching initial service states for %d services...",
+            len(MONITORED_SERVICES),
+        )
         for service_name in MONITORED_SERVICES:
+            LOGGER.debug("Fetching initial state for %s", service_name)
             current_props = _get_initial_service_properties(service_name)
             if current_props:
                 if (
@@ -436,10 +442,17 @@ def setup_dbus_monitor() -> bool:  # noqa: C901 # pylint: disable=too-many-state
                     state,
                 )
 
+        LOGGER.debug(
+            "Setting up signal subscriptions for %d services...",
+            len(MONITORED_SERVICES),
+        )
         for service_name in MONITORED_SERVICES:
             try:
+                LOGGER.debug("Subscribing to PropertiesChanged for %s", service_name)
                 unit_path = MANAGER_INTERFACE.GetUnit(service_name)
+                LOGGER.debug("Got unit path for %s: %s", service_name, unit_path)
                 unit_obj = SYSTEM_BUS.get_object(SYSTEMD_DBUS_SERVICE, str(unit_path))
+                LOGGER.debug("Got unit object for %s", service_name)
                 unit_obj.connect_to_signal(
                     "PropertiesChanged",
                     lambda interface, changed, invalidated, s=service_name: (
@@ -479,7 +492,17 @@ def setup_dbus_monitor() -> bool:  # noqa: C901 # pylint: disable=too-many-state
         print(f"ERROR: Unexpected error: {exc}", file=sys.stderr)
         return True
 
-    LOGGER.debug("D-Bus monitoring setup completed successfully")
+    LOGGER.info(
+        "D-Bus monitoring setup completed successfully - ready to receive signals"
+    )
+    LOGGER.debug(
+        "Event loop thread alive: %s",
+        (
+            SYSTEM_BUS._event_loop_thread.is_alive()
+            if hasattr(SYSTEM_BUS, "_event_loop_thread")
+            else "N/A"
+        ),
+    )
     return False
 
 
