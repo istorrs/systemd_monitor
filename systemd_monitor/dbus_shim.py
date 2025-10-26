@@ -291,7 +291,7 @@ class Interface:
                     ),
                     method_name,
                     signature,
-                    args if args else None,
+                    args if args else (),
                 )
                 reply = self.proxy_obj.conn.send_and_get_reply(msg)
                 # Return empty tuple for void methods, single value for single returns,
