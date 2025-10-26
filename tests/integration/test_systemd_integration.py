@@ -19,7 +19,6 @@ import time
 import json
 import subprocess
 import requests
-from pathlib import Path
 
 
 class Colors:
@@ -81,7 +80,7 @@ def get_prometheus_metric(metric_name, service_name=None, port=9100):
         return None
 
 
-def main():
+def main():  # noqa: C901
     """Run integration tests."""
 
     print(f"\n{Colors.BOLD}{'='*60}{Colors.RESET}")
@@ -139,7 +138,7 @@ def main():
 
         # Test 3: Start the monitor in background
         print(f"\n{Colors.BLUE}Test 3: Start systemd_monitor{Colors.RESET}")
-        services_arg = " ".join([f"--services"] + test_services)
+        services_arg = " ".join(["--services"] + test_services)
         monitor_cmd = (
             f"python3 -m systemd_monitor.systemd_monitor "
             f"{services_arg} "
