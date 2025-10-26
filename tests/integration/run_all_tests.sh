@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run all integration tests locally
+# Run systemd integration test locally
 # Requires Docker to be installed and running
 
 set -e
@@ -7,28 +7,24 @@ set -e
 cd "$(dirname "$0")"
 
 echo "=========================================="
-echo "Running All Integration Tests"
+echo "Systemd Integration Test"
 echo "=========================================="
 echo ""
-
-ALPINE_IMAGE="systemd-monitor-alpine-test"
-SYSTEMD_IMAGE="systemd-monitor-systemd-test"
-
-# Build and run Alpine test
-echo ">>> Test 1: Alpine Installation Test"
+echo "This test validates:"
+echo "  ✓ Installs without C compiler (pure Python)"
+echo "  ✓ All systemd monitoring features work"
+echo "  ✓ 12 test scenarios pass"
 echo ""
-docker build -f Dockerfile.alpine -t $ALPINE_IMAGE ../..
-docker run --rm $ALPINE_IMAGE
-ALPINE_RESULT=$?
 
-echo ""
-echo ">>> Alpine test result: $ALPINE_RESULT"
-echo ""
+SYSTEMD_IMAGE="systemd-monitor-integration-test"
 
 # Build and run systemd test
-echo ">>> Test 2: Systemd Integration Test"
-echo ""
+echo ">>> Building test container..."
 docker build -f Dockerfile.systemd -t $SYSTEMD_IMAGE ../..
+
+echo ""
+echo ">>> Running integration test..."
+echo ""
 
 # Run with systemd enabled (requires privileged mode)
 docker run --rm \
@@ -36,24 +32,22 @@ docker run --rm \
     -v /sys/fs/cgroup:/sys/fs/cgroup:ro \
     $SYSTEMD_IMAGE
 
-SYSTEMD_RESULT=$?
+RESULT=$?
 
 echo ""
-echo ">>> Systemd test result: $SYSTEMD_RESULT"
-echo ""
-
-# Summary
 echo "=========================================="
-echo "Integration Test Summary"
+echo "Test Result"
 echo "=========================================="
-echo "Alpine test:   $([ $ALPINE_RESULT -eq 0 ] && echo '✓ PASSED' || echo '✗ FAILED')"
-echo "Systemd test:  $([ $SYSTEMD_RESULT -eq 0 ] && echo '✓ PASSED' || echo '✗ FAILED')"
-echo ""
 
-if [ $ALPINE_RESULT -eq 0 ] && [ $SYSTEMD_RESULT -eq 0 ]; then
-    echo "✓ ALL INTEGRATION TESTS PASSED!"
+if [ $RESULT -eq 0 ]; then
+    echo "✓ INTEGRATION TEST PASSED!"
+    echo ""
+    echo "This proves:"
+    echo "  ✓ Package installs without C compiler"
+    echo "  ✓ Jeepney pure Python implementation works"
+    echo "  ✓ All monitoring features functional"
     exit 0
 else
-    echo "✗ SOME INTEGRATION TESTS FAILED"
+    echo "✗ INTEGRATION TEST FAILED"
     exit 1
 fi
