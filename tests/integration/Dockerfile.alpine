@@ -1,0 +1,21 @@
+# Alpine Linux integration test
+# Verifies package installs without C compiler
+FROM python:3.11-alpine
+
+# DO NOT install build tools - that's the point of this test!
+# We're proving the package works on minimal Alpine without gcc
+
+# Install runtime dependencies only
+RUN apk add --no-cache \
+    dbus \
+    && rm -rf /var/cache/apk/*
+
+# Copy source code
+COPY . /app
+WORKDIR /app
+
+# Install Python dependencies (should work without compilation)
+RUN pip install --no-cache-dir jeepney prometheus-client requests
+
+# Run the Alpine installation test
+CMD ["/bin/sh", "/app/tests/integration/test_alpine_install.sh"]

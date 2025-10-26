@@ -1,0 +1,54 @@
+# Ubuntu with systemd for integration testing
+# Verifies actual systemd service monitoring functionality
+FROM ubuntu:22.04
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install systemd and Python
+RUN apt-get update && apt-get install -y \
+    systemd \
+    systemd-sysv \
+    python3 \
+    python3-pip \
+    dbus \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configure systemd to run in container
+# Remove unnecessary systemd services
+RUN cd /lib/systemd/system/sysinit.target.wants/ \
+    && ls | grep -v systemd-tmpfiles-setup | xargs rm -f $1
+
+RUN rm -f /lib/systemd/system/multi-user.target.wants/* \
+    /etc/systemd/system/*.wants/* \
+    /lib/systemd/system/local-fs.target.wants/* \
+    /lib/systemd/system/sockets.target.wants/*udev* \
+    /lib/systemd/system/sockets.target.wants/*initctl* \
+    /lib/systemd/system/basic.target.wants/* \
+    /lib/systemd/system/anaconda.target.wants/* \
+    /lib/systemd/system/plymouth* \
+    /lib/systemd/system/systemd-update-utmp*
+
+# Copy source code
+COPY . /app
+WORKDIR /app
+
+# Install Python package and dependencies
+RUN pip3 install --no-cache-dir jeepney prometheus-client requests
+
+# Install the package
+RUN pip3 install -e .
+
+# Copy test services
+COPY tests/integration/test_services/*.service /tmp/
+
+# Volume for systemd
+VOLUME [ "/sys/fs/cgroup" ]
+
+# Entry point script
+COPY tests/integration/entrypoint_systemd.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Run systemd
+CMD ["/entrypoint.sh"]

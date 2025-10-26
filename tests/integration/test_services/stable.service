@@ -1,0 +1,11 @@
+[Unit]
+Description=Test Service - Stable (stays running)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/bin/sleep 3600
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

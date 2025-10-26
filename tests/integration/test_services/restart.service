@@ -1,0 +1,12 @@
+[Unit]
+Description=Test Service - Auto-restart (restarts on failure)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -c "sleep 1 && exit 1"
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

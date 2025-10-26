@@ -1,0 +1,11 @@
+[Unit]
+Description=Test Service - Flaky (crashes after 2 seconds)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -c "sleep 2 && exit 1"
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
