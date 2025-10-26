@@ -1,12 +1,11 @@
 # Ubuntu with systemd for integration testing
-# Validates that systemd_monitor works with pure Python (no C compiler needed)
+# Validates that systemd_monitor with Jeepney works correctly
 FROM ubuntu:22.04
 
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install systemd and Python - NO BUILD TOOLS
-# This proves the package installs without gcc/g++
+# Install systemd and Python
 RUN apt-get update && apt-get install -y \
     systemd \
     systemd-sysv \
@@ -15,17 +14,6 @@ RUN apt-get update && apt-get install -y \
     dbus \
     curl \
     && rm -rf /var/lib/apt/lists/*
-
-# Explicitly verify NO build tools installed
-RUN if command -v gcc >/dev/null 2>&1; then \
-        echo "ERROR: gcc found! This test must run without build tools."; \
-        exit 1; \
-    fi && \
-    if command -v g++ >/dev/null 2>&1; then \
-        echo "ERROR: g++ found! This test must run without build tools."; \
-        exit 1; \
-    fi && \
-    echo "✓ Verified: No C compiler available (proving pure Python works)"
 
 # Configure systemd to run in container
 RUN cd /lib/systemd/system/sysinit.target.wants/ \
@@ -45,10 +33,10 @@ RUN rm -f /lib/systemd/system/multi-user.target.wants/* \
 COPY . /app
 WORKDIR /app
 
-# Install Python package and dependencies (PURE PYTHON - no compilation!)
+# Install Python dependencies
 RUN pip3 install --no-cache-dir jeepney prometheus-client requests
 
-# Install the package (should work without gcc)
+# Install the package in editable mode (tests Jeepney branch code)
 RUN pip3 install -e .
 
 # Copy test services

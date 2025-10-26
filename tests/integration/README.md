@@ -4,8 +4,7 @@ This directory contains integration tests that validate the Jeepney pure-Python 
 
 ## What This Tests
 
-**Single comprehensive test** that validates:
-- ✅ Package installs **without a C compiler** (proves pure Python works)
+**Single comprehensive test** that validates the Jeepney implementation:
 - ✅ Service START detection
 - ✅ Service STOP detection
 - ✅ Service CRASH detection
@@ -15,22 +14,18 @@ This directory contains integration tests that validate the Jeepney pure-Python 
 - ✅ Graceful shutdown handling
 - ✅ All 12 monitoring scenarios
 
-**Container**: Ubuntu 22.04 with systemd (NO build tools installed)
+**Container**: Ubuntu 22.04 with systemd
 
 **Duration**: ~60 seconds
 
-## Why Ubuntu and Not Alpine?
+## Why Ubuntu?
 
-**Short answer**: You can't test systemd monitoring without systemd.
+We need a systemd-based distribution to test systemd monitoring.
 
-Alpine Linux uses OpenRC, not systemd. Testing on Alpine would be pointless because:
-- ❌ Alpine doesn't have systemd
-- ❌ Can't validate monitoring features
-- ❌ Would only test imports (meaningless)
-
-Instead, we use Ubuntu with systemd but **explicitly verify no build tools** are installed. This proves both:
-1. Pure Python installation (no gcc required)
-2. Actual monitoring functionality
+Ubuntu 22.04 provides:
+- ✅ systemd for actual service monitoring
+- ✅ Common production environment
+- ✅ Well-supported in Docker
 
 ## Running Tests
 
@@ -85,7 +80,8 @@ Failed: 0
 
 ## What This Proves
 
-✅ Jeepney pure-Python implementation works on production systems
-✅ No C compiler needed for installation
-✅ All monitoring features work identically to dbus-python
+✅ Jeepney implementation works correctly with systemd
+✅ All monitoring features work (feature parity with dbus-python)
+✅ State persistence works across restarts
+✅ Prometheus metrics are accurate
 ✅ Ready for production deployment

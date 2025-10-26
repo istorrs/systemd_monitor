@@ -6,15 +6,15 @@ I initially created an overly complex test suite with an Alpine Linux test. **Yo
 
 ## Current Approach (Correct)
 
-**One integration test** that proves everything:
+**One integration test** that validates everything:
 
 **Container**: Ubuntu 22.04 with systemd
-**Key**: Explicitly **verifies NO build tools** installed (no gcc/g++)
-**Tests**: 12 comprehensive scenarios
+**Tests**: 12 comprehensive scenarios with real systemd services
+**Duration**: ~60 seconds
 
 ## What This Proves
 
-1. ✅ **Pure Python installation** - Package installs without C compiler
+1. ✅ **Jeepney implementation works** - D-Bus communication functions correctly
 2. ✅ **All monitoring features work** - 12 test scenarios pass
 3. ✅ **Production ready** - Real systemd, real services, real functionality
 
@@ -52,16 +52,14 @@ Or push to branch - GitHub Actions will run it automatically.
 
 **Duration**: ~60 seconds
 
-## Why Not Alpine?
+## Why Ubuntu?
 
-Alpine uses OpenRC, not systemd. You can't test systemd monitoring without systemd.
-
-Instead, we use Ubuntu (has systemd) but **explicitly verify no gcc** is installed. This proves pure Python works.
+Ubuntu has systemd. You can't test systemd monitoring without systemd.
 
 ## Result
 
-**One focused test** that validates both claims:
-- "Installs without C compiler" ✓
-- "Monitors systemd correctly" ✓
+**One focused test** that validates:
+- Jeepney D-Bus implementation works with systemd ✓
+- All monitoring features functional ✓
 
 Simple. Correct. Effective.
