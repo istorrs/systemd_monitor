@@ -507,7 +507,7 @@ def _get_initial_service_properties(service_name: str) -> Optional[Dict[str, Any
             "ExecMainCode": int(exec_main_code),
             "StateChangeTimestamp": int(state_change_timestamp),
         }
-    except dbus.exceptions.DBusException:
+    except dbus.exceptions.DBusException as exc:
         LOGGER.exception("Failed to set up D-Bus monitoring: %s", exc)
         LOGGER.error("Exception type: %s", type(exc).__name__)
         return None
