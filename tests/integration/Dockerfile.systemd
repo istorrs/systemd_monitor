@@ -36,8 +36,8 @@ WORKDIR /app
 # Install Python dependencies
 RUN pip3 install --no-cache-dir jeepney prometheus-client requests
 
-# Install the package in editable mode (tests Jeepney branch code)
-RUN pip3 install -e .
+# Install the package (from current source)
+RUN pip3 install .
 
 # Copy test services
 COPY tests/integration/test_services/*.service /tmp/
