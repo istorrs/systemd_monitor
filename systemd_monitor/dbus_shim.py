@@ -212,6 +212,7 @@ class ProxyObject:  # pylint: disable=too-few-public-methods
         self.conn = conn
         self.bus_name = bus_name
         self.object_path = object_path
+        self.bus_instance = bus_instance  # Store reference to access _io_lock
         self.bus = bus_instance
 
     def connect_to_signal(
