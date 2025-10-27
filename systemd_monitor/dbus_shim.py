@@ -65,12 +65,12 @@ class _SystemBus:
             )
 
         self.conn = open_dbus_connection(bus="SYSTEM")
-        self.conn.sock.setblocking(False)
+        # Keep socket in BLOCKING mode - Jeepney's send_and_get_reply() requires it
+        # Background thread uses select() with timeout to avoid blocking forever
         self.subscriptions: Dict[str, Callable] = {}
         self.subscriptions_lock = threading.Lock()
 
-        # Lock to prevent race condition: background thread and main thread
-        # both call conn.send()/receive(), causing one to block forever
+        # Lock to serialize D-Bus I/O between background thread and main thread
         self._io_lock = threading.Lock()
 
         self._running = True
