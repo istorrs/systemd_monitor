@@ -283,6 +283,15 @@ class Interface:
                     # Default to string array
                     signature = "s" * len(args)
 
+                LOGGER.debug(
+                    "D-Bus call: %s.%s(%s) [sig=%s] on %s",
+                    self.interface_name,
+                    method_name,
+                    args,
+                    signature,
+                    self.proxy_obj.object_path,
+                )
+
                 msg = new_method_call(
                     DBusAddress(
                         self.proxy_obj.object_path,
@@ -293,7 +302,11 @@ class Interface:
                     signature,
                     args if args else (),
                 )
+
+                LOGGER.debug("Sending D-Bus message, waiting for reply...")
                 reply = self.proxy_obj.conn.send_and_get_reply(msg)
+                LOGGER.debug("Received D-Bus reply: body=%s", reply.body)
+
                 # Return empty tuple for void methods, single value for single returns,
                 # or full tuple for multiple returns
                 if not reply.body:
@@ -302,6 +315,12 @@ class Interface:
                     return reply.body[0]  # Single return value
                 return reply.body  # Multiple return values
             except Exception as exc:  # pylint: disable=broad-exception-caught
+                LOGGER.error(
+                    "D-Bus call failed: %s.%s - %s",
+                    self.interface_name,
+                    method_name,
+                    exc,
+                )
                 raise DBusException(f"{method_name} failed: {exc}") from exc
 
         return method_call
