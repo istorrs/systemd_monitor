@@ -495,14 +495,6 @@ def setup_dbus_monitor() -> bool:  # noqa: C901 # pylint: disable=too-many-state
     LOGGER.info(
         "D-Bus monitoring setup completed successfully - ready to receive signals"
     )
-    LOGGER.debug(
-        "Event loop thread alive: %s",
-        (
-            SYSTEM_BUS._event_loop_thread.is_alive()
-            if hasattr(SYSTEM_BUS, "_event_loop_thread")
-            else "N/A"
-        ),
-    )
     return False
 
 
