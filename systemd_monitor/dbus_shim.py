@@ -18,13 +18,13 @@ Performance: ~5-10x slower than dbus-python but sufficient for systemd monitorin
 """
 
 import logging
-import select
 import threading
+from queue import Queue, Empty
 from typing import Callable, Optional, Dict, Any
 
 try:
-    from jeepney import DBusAddress, new_method_call, MessageType
-    from jeepney.io.blocking import open_dbus_connection
+    from jeepney import DBusAddress, new_method_call, MatchRule
+    from jeepney.bus_messages import message_bus
 
     JEEPNEY_AVAILABLE = True
 except ImportError:
@@ -49,34 +49,45 @@ class _DBusExceptionsModule:  # pylint: disable=too-few-public-methods
     DBusException = DBusException
 
 
-class _SystemBus:
+class _SystemBus:  # pylint: disable=too-many-instance-attributes
     """
     D-Bus system bus connection using Jeepney.
 
     Provides a compatibility layer matching dbus.SystemBus() API.
-    Runs a background thread to process incoming D-Bus messages and dispatch signals.
+    Uses DBusRouter with built-in receiver thread for signal handling.
     """
 
     def __init__(self):
-        """Initialize system bus connection and start event loop thread."""
+        """Initialize system bus connection with DBusRouter."""
         if not JEEPNEY_AVAILABLE:
             raise ImportError(
                 "Jeepney not installed. Install with: pip install jeepney"
             )
 
+        # Open D-Bus router (connection + receiver thread)
+        # Note: We can't use context manager since we need long-lived connection
+        # pylint: disable=import-outside-toplevel
+        from jeepney.io.threading import open_dbus_connection, DBusRouter
+
         self.conn = open_dbus_connection(bus="SYSTEM")
-        # Keep socket in BLOCKING mode - Jeepney's send_and_get_reply() requires it
-        # Background thread uses select() with timeout to avoid blocking forever
+        self.router = DBusRouter(self.conn)
+
+        # Subscriptions: service_name -> callback
         self.subscriptions: Dict[str, Callable] = {}
         self.subscriptions_lock = threading.Lock()
 
-        # Lock to serialize D-Bus I/O between background thread and main thread
-        self._io_lock = threading.Lock()
+        # Signal queue for PropertiesChanged signals
+        self.signal_queue: Queue = Queue()
 
+        # Subscribe to all PropertiesChanged signals from systemd units
+        self._setup_signal_filter()
+
+        # Dispatcher thread to process signals
         self._running = True
-        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread = threading.Thread(target=self._signal_dispatcher, daemon=True)
         self._thread.start()
-        LOGGER.info("Jeepney D-Bus shim initialized with background event loop")
+
+        LOGGER.info("Jeepney D-Bus shim initialized with DBusRouter")
 
     def get_object(self, bus_name: str, object_path: str) -> "ProxyObject":
         """
@@ -89,38 +100,45 @@ class _SystemBus:
         Returns:
             ProxyObject that can be used to interact with the D-Bus object
         """
-        return ProxyObject(self.conn, bus_name, object_path, self)
+        return ProxyObject(self.router, bus_name, object_path, self)
 
     def close(self):
-        """Clean shutdown of connection and event loop."""
+        """Clean shutdown of router and connection."""
         self._running = False
         if hasattr(self, "_thread") and self._thread.is_alive():
             self._thread.join(timeout=2.0)
-        if self.conn:
+        if hasattr(self, "router"):
+            try:
+                self.router.close()
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                LOGGER.debug("Error closing D-Bus router: %s", exc)
+        if hasattr(self, "conn"):
             try:
                 self.conn.close()
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 LOGGER.debug("Error closing D-Bus connection: %s", exc)
-            self.conn = None
         LOGGER.info("Jeepney D-Bus shim shut down")
 
-    def _add_match(self, rule: str):
-        """Subscribe to D-Bus signals matching rule."""
-        try:
-            msg = new_method_call(
-                DBusAddress(
-                    "/org/freedesktop/DBus",
-                    bus_name="org.freedesktop.DBus",
-                    interface="org.freedesktop.DBus",
-                ),
-                "AddMatch",
-                "s",
-                (rule,),
-            )
-            self.conn.send_and_get_reply(msg)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            LOGGER.error("Failed to add D-Bus match rule: %s", exc)
-            raise DBusException(f"AddMatch failed: {exc}") from exc
+    def _setup_signal_filter(self):
+        """Set up filter for PropertiesChanged signals from systemd units."""
+        # Create match rule for PropertiesChanged signals
+        rule = MatchRule(
+            type="signal",
+            interface=SYSTEMD_PROPERTIES_INTERFACE,
+            member="PropertiesChanged",
+            path_namespace="/org/freedesktop/systemd1/unit",
+        )
+
+        # Subscribe to signals on D-Bus using message_bus
+        # pylint: disable=import-outside-toplevel
+        from jeepney.io.threading import Proxy
+
+        bus_proxy = Proxy(message_bus, self.router)
+        bus_proxy.AddMatch(rule)
+        LOGGER.debug("Subscribed to PropertiesChanged signals via message_bus.AddMatch")
+
+        # Create filter that routes matching messages to our queue
+        self._filter_handle = self.router.filter(rule, queue=self.signal_queue)
 
     def _escape_unit(self, name: str) -> str:
         """Escape systemd unit name for D-Bus path."""
@@ -164,22 +182,12 @@ class _SystemBus:
         except Exception as exc:  # pylint: disable=broad-exception-caught
             LOGGER.error("Error in callback for %s: %s", service_name, exc)
 
-    def _run_loop(self):
-        """Background thread: receives D-Bus signals and calls callbacks."""
+    def _signal_dispatcher(self):
+        """Background thread: reads signals from queue and dispatches to callbacks."""
         while self._running:
             try:
-                # Use select with timeout to allow clean shutdown
-                rlist, _, _ = select.select([self.conn.sock], [], [], 0.1)
-                if not rlist:
-                    continue
-
-                # Acquire lock before receiving to prevent race with send_and_get_reply()
-                with self._io_lock:
-                    msg = self.conn.receive()
-
-                # Only process signals
-                if msg.header.message_type != MessageType.signal:
-                    continue
+                # Wait for signal with timeout to allow clean shutdown
+                msg = self.signal_queue.get(timeout=0.1)
 
                 # Extract signal information
                 path = getattr(msg.header, "path", "") or ""
@@ -193,9 +201,12 @@ class _SystemBus:
                 ):
                     self._process_properties_changed(msg, path)
 
+            except Empty:
+                # Timeout - continue loop to check _running flag
+                continue
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 if self._running:  # Only log if not shutting down
-                    LOGGER.debug("Event loop error: %s", exc)
+                    LOGGER.debug("Signal dispatcher error: %s", exc)
 
 
 class ProxyObject:  # pylint: disable=too-few-public-methods
@@ -206,13 +217,20 @@ class ProxyObject:  # pylint: disable=too-few-public-methods
     """
 
     def __init__(
-        self, conn, bus_name: str, object_path: str, bus_instance: "_SystemBus"
+        self, router, bus_name: str, object_path: str, bus_instance: "_SystemBus"
     ):
-        """Initialize proxy object."""
-        self.conn = conn
+        """Initialize proxy object.
+
+        Args:
+            router: DBusRouter instance for D-Bus communication
+            bus_name: D-Bus service name
+            object_path: D-Bus object path
+            bus_instance: Reference to parent _SystemBus instance
+        """
+        self.router = router
         self.bus_name = bus_name
         self.object_path = object_path
-        self.bus_instance = bus_instance  # Store reference to access _io_lock
+        self.bus_instance = bus_instance
         self.bus = bus_instance
 
     def connect_to_signal(
@@ -239,18 +257,12 @@ class ProxyObject:  # pylint: disable=too-few-public-methods
             return
 
         # Register callback (thread-safe)
+        # The global signal filter in _setup_signal_filter already subscribes to all
+        # PropertiesChanged signals, so we just need to register the callback
         with self.bus.subscriptions_lock:
             self.bus.subscriptions[unit_name] = handler_function
 
-        # Add D-Bus match rule
-        rule = (
-            f"type='signal',"
-            f"interface='{SYSTEMD_PROPERTIES_INTERFACE}',"
-            f"path='{self.object_path}'"
-        )
-        self.bus._add_match(rule)  # pylint: disable=protected-access
-
-        LOGGER.debug("Subscribed to PropertiesChanged for %s", unit_name)
+        LOGGER.debug("Registered callback for PropertiesChanged on %s", unit_name)
 
     def _extract_unit_name(self) -> Optional[str]:
         """Extract unit name from D-Bus object path."""
@@ -312,9 +324,8 @@ class Interface:
                 )
 
                 LOGGER.debug("Sending D-Bus message, waiting for reply...")
-                # Acquire I/O lock to prevent race with background signal thread
-                with self.proxy_obj.bus_instance._io_lock:  # pylint: disable=protected-access
-                    reply = self.proxy_obj.conn.send_and_get_reply(msg)
+                # DBusRouter.send_and_get_reply() is thread-safe
+                reply = self.proxy_obj.router.send_and_get_reply(msg)
                 LOGGER.debug("Received D-Bus reply: body=%s", reply.body)
 
                 # Return empty tuple for void methods, single value for single returns,
@@ -361,9 +372,8 @@ class Interface:
                 "ss",
                 (interface, property_name),
             )
-            # Acquire I/O lock to prevent race with background signal thread
-            with self.proxy_obj.bus_instance._io_lock:  # pylint: disable=protected-access
-                reply = self.proxy_obj.conn.send_and_get_reply(msg)
+            # DBusRouter.send_and_get_reply() is thread-safe
+            reply = self.proxy_obj.router.send_and_get_reply(msg)
             return reply.body[0] if reply.body else None
         except Exception as exc:  # pylint: disable=broad-exception-caught
             raise DBusException(f"Get property failed: {exc}") from exc

@@ -1,8 +1,8 @@
 """Unit tests for D-Bus shim layer (Jeepney compatibility)."""
 
-# pylint: disable=too-few-public-methods,too-many-arguments,too-many-positional-arguments
+# pylint: disable=too-few-public-methods,too-many-arguments
 # pylint: disable=import-outside-toplevel,protected-access,attribute-defined-outside-init
-# pylint: disable=reimported
+# pylint: disable=reimported,import-error
 
 import sys
 import threading
@@ -42,29 +42,56 @@ class MockMessage:
     """Mock D-Bus message."""
 
     def __init__(
-        self, message_type="signal", path="", interface="", member="", body=None
+        self, *, message_type="signal", path="", interface="", member="", body=None
     ):
         self.header = MockHeader(message_type, path, interface, member)
         self.body = body or []
 
 
-# Mock connection
+class MockMatchRule:
+    """Mock jeepney.MatchRule."""
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    def serialise(self):
+        """Mock serialise method."""
+        return "mock_rule"
+
+
+# Mock connection and router
 mock_conn = MagicMock()
 mock_conn.sock = MagicMock()
+mock_router = MagicMock()
+mock_router.send_and_get_reply = Mock(return_value=MockMessage(body=[]))
+mock_filter_handle = MagicMock()
+mock_router.filter = Mock(return_value=mock_filter_handle)
+
 mock_open_dbus_connection = Mock(return_value=mock_conn)
+mock_dbus_router_class = Mock(return_value=mock_router)
+mock_proxy_class = MagicMock()
 
 # Create mock jeepney module
 mock_jeepney = Mock()
 mock_jeepney.DBusAddress = MockDBusAddress
 mock_jeepney.MessageType = MockMessageType
 mock_jeepney.new_method_call = Mock()
+mock_jeepney.MatchRule = MockMatchRule
+
+mock_message_bus = MagicMock()
+mock_jeepney.bus_messages = Mock()
+mock_jeepney.bus_messages.message_bus = mock_message_bus
 
 mock_jeepney_io = Mock()
-mock_jeepney_io.blocking.open_dbus_connection = mock_open_dbus_connection
+mock_jeepney_io.threading = Mock()
+mock_jeepney_io.threading.open_dbus_connection = mock_open_dbus_connection
+mock_jeepney_io.threading.DBusRouter = mock_dbus_router_class
+mock_jeepney_io.threading.Proxy = mock_proxy_class
 
 sys.modules["jeepney"] = mock_jeepney
+sys.modules["jeepney.bus_messages"] = mock_jeepney.bus_messages
 sys.modules["jeepney.io"] = mock_jeepney_io
-sys.modules["jeepney.io.blocking"] = mock_jeepney_io.blocking
+sys.modules["jeepney.io.threading"] = mock_jeepney_io.threading
 
 # Now import the module under test
 # pylint: disable=wrong-import-position
@@ -102,7 +129,10 @@ class TestSystemBus:
     def setup_method(self):
         """Reset mocks before each test."""
         mock_conn.reset_mock()
+        mock_router.reset_mock()
         mock_open_dbus_connection.reset_mock()
+        mock_dbus_router_class.reset_mock()
+        mock_proxy_class.reset_mock()
         mock_jeepney.new_method_call.reset_mock()
 
         # Reset global singleton
@@ -117,7 +147,8 @@ class TestSystemBus:
 
         mock_open_dbus_connection.assert_called_once_with(bus="SYSTEM")
         assert bus.conn is mock_conn
-        mock_conn.sock.setblocking.assert_called_once_with(False)
+        mock_dbus_router_class.assert_called_once_with(mock_conn)
+        assert bus.router is mock_router
 
     def test_initialization_starts_event_loop_thread(self):
         """Test that SystemBus starts background thread."""
@@ -139,7 +170,7 @@ class TestSystemBus:
         assert isinstance(obj, ProxyObject)
         assert obj.bus_name == "org.test.Service"
         assert obj.object_path == "/test/path"
-        assert obj.conn is mock_conn
+        assert obj.router is mock_router
 
         # Cleanup
         bus.close()
@@ -157,13 +188,13 @@ class TestSystemBus:
         assert not thread.is_alive()
 
     def test_close_closes_connection(self):
-        """Test that close closes D-Bus connection."""
+        """Test that close closes D-Bus connection and router."""
         bus = SystemBus()
 
         bus.close()
 
+        mock_router.close.assert_called_once()
         mock_conn.close.assert_called_once()
-        assert bus.conn is None
 
     def test_close_handles_connection_error(self):
         """Test that close handles connection close errors gracefully."""
@@ -173,7 +204,7 @@ class TestSystemBus:
         # Should not raise
         bus.close()
 
-        assert bus.conn is None
+        # Error should be caught and logged, not raised
 
     def test_escape_unit_name(self):
         """Test unit name escaping for D-Bus paths."""
@@ -195,31 +226,26 @@ class TestSystemBus:
 
         bus.close()
 
-    def test_add_match_subscribes_to_signals(self):
-        """Test that _add_match subscribes to D-Bus signals."""
+    def test_setup_signal_filter_called_on_init(self):
+        """Test that signal filter is set up during initialization."""
         bus = SystemBus()
-        rule = "type='signal',interface='org.test.Interface'"
 
-        mock_reply = Mock()
-        mock_conn.send_and_get_reply.return_value = mock_reply
-
-        bus._add_match(rule)
-
-        mock_jeepney.new_method_call.assert_called_once()
-        call_args = mock_jeepney.new_method_call.call_args[0]
-        assert call_args[1] == "AddMatch"
-        assert call_args[2] == "s"
-        assert call_args[3] == (rule,)
+        # Verify that router.filter() was called to set up signal filtering
+        mock_router.filter.assert_called_once()
+        # Verify Proxy was created for message_bus
+        mock_proxy_class.assert_called_once_with(mock_message_bus, mock_router)
 
         bus.close()
 
-    def test_add_match_raises_on_error(self):
-        """Test that _add_match raises DBusException on error."""
+    def test_signal_queue_created(self):
+        """Test that signal queue is created for signal dispatching."""
         bus = SystemBus()
-        mock_conn.send_and_get_reply.side_effect = Exception("D-Bus error")
 
-        with pytest.raises(DBusException):
-            bus._add_match("test_rule")
+        # Verify signal_queue exists
+        assert hasattr(bus, "signal_queue")
+        from queue import Queue
+
+        assert isinstance(bus.signal_queue, Queue)
 
         bus.close()
 
@@ -236,7 +262,7 @@ class TestSystemBus:
 
         # Create mock signal message using the correct MessageType value
         msg = MockMessage(
-            message_type=dbus_shim.MessageType.signal,
+            message_type=dbus_shim.MessageType.signal,  # pylint: disable=no-member
             path="/org/freedesktop/systemd1/unit/test_2eservice",
             interface="org.freedesktop.DBus.Properties",
             member="PropertiesChanged",
@@ -269,32 +295,32 @@ class TestSystemBus:
         finally:
             bus.close()
 
-    @patch("select.select")
-    def test_event_loop_ignores_non_signal_messages(self, mock_select):
-        """Test that event loop ignores non-signal messages."""
+    def test_signal_dispatcher_filters_messages(self):
+        """Test that signal dispatcher only processes PropertiesChanged signals."""
         bus = SystemBus()
         callback = Mock()
         bus.subscriptions["test.service"] = callback
 
-        # Create non-signal message
-        msg = MockMessage(message_type="method_call")
+        # Put a PropertiesChanged signal in the queue
+        msg = MockMessage(
+            message_type="signal",
+            path="/org/freedesktop/systemd1/unit/test_2eservice",
+            interface="org.freedesktop.DBus.Properties",
+            member="PropertiesChanged",
+            body=["interface", {"key": "value"}, []],
+        )
+        bus.signal_queue.put(msg)
 
-        mock_select.side_effect = [
-            ([mock_conn.sock], [], []),
-            ([], [], []),
-        ]
-        mock_conn.receive.return_value = msg
-
+        # Give dispatcher time to process
         time.sleep(0.2)
 
-        # Callback should not be called
-        callback.assert_not_called()
+        # Callback should be called
+        callback.assert_called_once()
 
         bus.close()
 
-    @patch("select.select")
-    def test_event_loop_handles_callback_errors(self, mock_select):
-        """Test that event loop handles callback exceptions gracefully."""
+    def test_signal_dispatcher_handles_callback_errors(self):
+        """Test that signal dispatcher handles callback exceptions gracefully."""
         bus = SystemBus()
 
         # Setup callback that raises
@@ -309,11 +335,8 @@ class TestSystemBus:
             body=["interface", {}, []],
         )
 
-        mock_select.side_effect = [
-            ([mock_conn.sock], [], []),
-            ([], [], []),
-        ]
-        mock_conn.receive.return_value = msg
+        # Put message in queue
+        bus.signal_queue.put(msg)
 
         time.sleep(0.2)
 
@@ -349,17 +372,16 @@ class TestProxyObject:
     def setup_method(self):
         """Setup test fixtures."""
         self.bus = MagicMock()
-        self.bus.conn = mock_conn
+        self.bus.router = mock_router
         self.bus._unescape_unit = Mock(side_effect=lambda x: x.replace("_2e", "."))
-        self.bus._add_match = Mock()
         self.bus.subscriptions = {}
         self.bus.subscriptions_lock = threading.Lock()
 
     def test_initialization(self):
         """Test ProxyObject initialization."""
-        obj = ProxyObject(mock_conn, "org.test.Service", "/test/path", self.bus)
+        obj = ProxyObject(mock_router, "org.test.Service", "/test/path", self.bus)
 
-        assert obj.conn is mock_conn
+        assert obj.router is mock_router
         assert obj.bus_name == "org.test.Service"
         assert obj.object_path == "/test/path"
         assert obj.bus is self.bus
@@ -367,7 +389,7 @@ class TestProxyObject:
     def test_connect_to_signal_registers_callback(self):
         """Test that connect_to_signal registers callback."""
         obj = ProxyObject(
-            mock_conn,
+            mock_router,
             "org.test.Service",
             "/org/freedesktop/systemd1/unit/test_2eservice",
             self.bus,
@@ -379,10 +401,10 @@ class TestProxyObject:
         assert "test.service" in self.bus.subscriptions
         assert self.bus.subscriptions["test.service"] is callback
 
-    def test_connect_to_signal_adds_match_rule(self):
-        """Test that connect_to_signal adds D-Bus match rule."""
+    def test_connect_to_signal_no_duplicate_match_rules(self):
+        """Test that connect_to_signal only registers callback (filter already set up)."""
         obj = ProxyObject(
-            mock_conn,
+            mock_router,
             "org.test.Service",
             "/org/freedesktop/systemd1/unit/test_2eservice",
             self.bus,
@@ -391,21 +413,20 @@ class TestProxyObject:
         callback = Mock()
         obj.connect_to_signal("PropertiesChanged", callback)
 
-        self.bus._add_match.assert_called_once()
-        rule = self.bus._add_match.call_args[0][0]
-        assert "type='signal'" in rule
-        assert "/org/freedesktop/systemd1/unit/test_2eservice" in rule
+        # Callback should be registered
+        assert "test.service" in self.bus.subscriptions
+        # Global filter is set up during SystemBus.__init__, not here
 
     def test_connect_to_signal_warns_on_unsupported_signal(self):
         """Test that connect_to_signal warns on unsupported signals."""
-        obj = ProxyObject(mock_conn, "org.test.Service", "/test/path", self.bus)
+        obj = ProxyObject(mock_router, "org.test.Service", "/test/path", self.bus)
 
         # Should not crash, just log warning
         obj.connect_to_signal("UnsupportedSignal", Mock())
 
     def test_connect_to_signal_handles_invalid_path(self):
         """Test that connect_to_signal handles invalid paths."""
-        obj = ProxyObject(mock_conn, "org.test.Service", "/invalid/path", self.bus)
+        obj = ProxyObject(mock_router, "org.test.Service", "/invalid/path", self.bus)
 
         # Should not crash
         obj.connect_to_signal("PropertiesChanged", Mock())
@@ -413,7 +434,7 @@ class TestProxyObject:
     def test_extract_unit_name_success(self):
         """Test extracting unit name from valid path."""
         obj = ProxyObject(
-            mock_conn,
+            mock_router,
             "org.test.Service",
             "/org/freedesktop/systemd1/unit/nginx_2eservice",
             self.bus,
@@ -424,7 +445,7 @@ class TestProxyObject:
 
     def test_extract_unit_name_invalid_path(self):
         """Test extracting unit name from invalid path."""
-        obj = ProxyObject(mock_conn, "org.test.Service", "/invalid/path", self.bus)
+        obj = ProxyObject(mock_router, "org.test.Service", "/invalid/path", self.bus)
 
         unit_name = obj._extract_unit_name()
         assert unit_name is None
@@ -436,14 +457,16 @@ class TestInterface:
     def setup_method(self):
         """Setup test fixtures."""
         # Reset mocks
-        mock_conn.reset_mock()
-        mock_conn.send_and_get_reply.side_effect = None
+        mock_router.reset_mock()
+        mock_router.send_and_get_reply.side_effect = None
+        mock_router.send_and_get_reply.return_value = MockMessage(body=[])
         mock_jeepney.new_method_call.reset_mock()
 
         self.proxy_obj = MagicMock()
-        self.proxy_obj.conn = mock_conn
+        self.proxy_obj.router = mock_router
         self.proxy_obj.bus_name = "org.test.Service"
         self.proxy_obj.object_path = "/test/path"
+        self.proxy_obj.bus_instance = MagicMock()
 
     def test_initialization(self):
         """Test Interface initialization."""
@@ -458,7 +481,7 @@ class TestInterface:
 
         mock_reply = Mock()
         mock_reply.body = ["/test/result"]
-        mock_conn.send_and_get_reply.return_value = mock_reply
+        mock_router.send_and_get_reply.return_value = mock_reply
 
         result = interface.TestMethod("arg1")
 
@@ -475,7 +498,7 @@ class TestInterface:
 
         mock_reply = Mock()
         mock_reply.body = []
-        mock_conn.send_and_get_reply.return_value = mock_reply
+        mock_router.send_and_get_reply.return_value = mock_reply
 
         result = interface.Subscribe()
 
@@ -488,7 +511,7 @@ class TestInterface:
     def test_method_call_raises_on_error(self):
         """Test that method call raises DBusException on error."""
         interface = Interface(self.proxy_obj, "org.test.Interface")
-        mock_conn.send_and_get_reply.side_effect = Exception("Method call failed")
+        mock_router.send_and_get_reply.side_effect = Exception("Method call failed")
 
         with pytest.raises(DBusException):
             interface.FailingMethod()
@@ -499,7 +522,7 @@ class TestInterface:
 
         mock_reply = Mock()
         mock_reply.body = ["active"]
-        mock_conn.send_and_get_reply.return_value = mock_reply
+        mock_router.send_and_get_reply.return_value = mock_reply
 
         result = interface.Get("org.test.Interface", "State")
 
@@ -512,7 +535,7 @@ class TestInterface:
     def test_get_property_raises_on_error(self):
         """Test that Get raises DBusException on error."""
         interface = Interface(self.proxy_obj, "org.freedesktop.DBus.Properties")
-        mock_conn.send_and_get_reply.side_effect = Exception("Property access failed")
+        mock_router.send_and_get_reply.side_effect = Exception("Property access failed")
 
         with pytest.raises(DBusException):
             interface.Get("org.test.Interface", "State")
