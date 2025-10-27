@@ -68,6 +68,11 @@ class _SystemBus:
         self.conn.sock.setblocking(False)
         self.subscriptions: Dict[str, Callable] = {}
         self.subscriptions_lock = threading.Lock()
+
+        # Lock to prevent race condition: background thread and main thread
+        # both call conn.send()/receive(), causing one to block forever
+        self._io_lock = threading.Lock()
+
         self._running = True
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
@@ -168,7 +173,9 @@ class _SystemBus:
                 if not rlist:
                     continue
 
-                msg = self.conn.receive()
+                # Acquire lock before receiving to prevent race with send_and_get_reply()
+                with self._io_lock:
+                    msg = self.conn.receive()
 
                 # Only process signals
                 if msg.header.message_type != MessageType.signal:
@@ -304,7 +311,9 @@ class Interface:
                 )
 
                 LOGGER.debug("Sending D-Bus message, waiting for reply...")
-                reply = self.proxy_obj.conn.send_and_get_reply(msg)
+                # Acquire I/O lock to prevent race with background signal thread
+                with self.proxy_obj.bus_instance._io_lock:  # pylint: disable=protected-access
+                    reply = self.proxy_obj.conn.send_and_get_reply(msg)
                 LOGGER.debug("Received D-Bus reply: body=%s", reply.body)
 
                 # Return empty tuple for void methods, single value for single returns,
@@ -351,7 +360,9 @@ class Interface:
                 "ss",
                 (interface, property_name),
             )
-            reply = self.proxy_obj.conn.send_and_get_reply(msg)
+            # Acquire I/O lock to prevent race with background signal thread
+            with self.proxy_obj.bus_instance._io_lock:  # pylint: disable=protected-access
+                reply = self.proxy_obj.conn.send_and_get_reply(msg)
             return reply.body[0] if reply.body else None
         except Exception as exc:  # pylint: disable=broad-exception-caught
             raise DBusException(f"Get property failed: {exc}") from exc
