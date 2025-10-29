@@ -50,6 +50,32 @@ class _DBusExceptionsModule:  # pylint: disable=too-few-public-methods
     DBusException = DBusException
 
 
+def _unwrap_variant(value: Any) -> Any:
+    """
+    Unwrap D-Bus variant values.
+
+    Jeepney returns variants as tuples: ('i', 5) or (5,).
+    This unwraps them to get the actual value.
+
+    Args:
+        value: Value that may be a variant tuple
+
+    Returns:
+        Unwrapped value
+    """
+    # Unwrap variant tuples: ('i', 5) or (5,) → 5
+    while isinstance(value, tuple) and len(value) <= 2:
+        if len(value) == 2:
+            # Format: (signature, value)
+            value = value[1]
+        elif len(value) == 1:
+            # Format: (value,)
+            value = value[0]
+        else:
+            break
+    return value
+
+
 class _SystemBus:  # pylint: disable=too-many-instance-attributes
     """
     D-Bus system bus connection using Jeepney.
@@ -195,8 +221,12 @@ class _SystemBus:  # pylint: disable=too-many-instance-attributes
 
         # Extract signal body
         changed_interface = msg.body[0] if len(msg.body) > 0 else ""
-        changed = msg.body[1] if len(msg.body) > 1 else {}
+        changed_raw = msg.body[1] if len(msg.body) > 1 else {}
         invalidated = msg.body[2] if len(msg.body) > 2 else []
+
+        # Unwrap variant values in changed properties dict
+        # Jeepney returns property values as variants: ('i', 5) or (5,)
+        changed = {key: _unwrap_variant(value) for key, value in changed_raw.items()}
 
         LOGGER.debug(
             "Calling callback for %s: interface=%s, changed=%s",
@@ -426,17 +456,7 @@ class Interface:
 
             # D-Bus Properties.Get returns a variant - unwrap it
             result = reply.body[0] if reply.body else None
-            # Unwrap variant tuples: ('i', 5) or (5,) → 5
-            while isinstance(result, tuple) and len(result) <= 2:
-                if len(result) == 2:
-                    # Format: (signature, value)
-                    result = result[1]
-                elif len(result) == 1:
-                    # Format: (value,)
-                    result = result[0]
-                else:
-                    break
-            return result
+            return _unwrap_variant(result)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             raise DBusException(f"Get property failed: {exc}") from exc
 
