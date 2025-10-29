@@ -165,16 +165,31 @@ class _SystemBus:  # pylint: disable=too-many-instance-attributes
         """Process PropertiesChanged signal."""
         # Extract unit name from path
         if "/unit/" not in path:
+            LOGGER.debug(
+                "Ignoring PropertiesChanged: path doesn't contain /unit/: %s", path
+            )
             return
 
         unit_name_escaped = path.split("/")[-1]
         service_name = self._unescape_unit(unit_name_escaped)
 
+        LOGGER.debug(
+            "Processing PropertiesChanged for %s (escaped: %s)",
+            service_name,
+            unit_name_escaped,
+        )
+
         # Thread-safe callback lookup
         with self.subscriptions_lock:
             callback = self.subscriptions.get(service_name)
+            registered_services = list(self.subscriptions.keys())
 
         if not callback:
+            LOGGER.warning(
+                "No callback found for %s. Registered services: %s",
+                service_name,
+                registered_services,
+            )
             return
 
         # Extract signal body
@@ -182,23 +197,43 @@ class _SystemBus:  # pylint: disable=too-many-instance-attributes
         changed = msg.body[1] if len(msg.body) > 1 else {}
         invalidated = msg.body[2] if len(msg.body) > 2 else []
 
+        LOGGER.debug(
+            "Calling callback for %s: interface=%s, changed=%s",
+            service_name,
+            changed_interface,
+            list(changed.keys()) if changed else [],
+        )
+
         # Call callback
         try:
             callback(changed_interface, changed, invalidated)
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            LOGGER.error("Error in callback for %s: %s", service_name, exc)
+            LOGGER.error(
+                "Error in callback for %s: %s", service_name, exc, exc_info=True
+            )
 
     def _signal_dispatcher(self):
         """Background thread: reads signals from queue and dispatches to callbacks."""
+        LOGGER.info("Signal dispatcher thread started")
+        message_count = 0
         while self._running:
             try:
                 # Wait for signal with timeout to allow clean shutdown
                 msg = self.signal_queue.get(timeout=0.1)
+                message_count += 1
 
                 # Extract signal information
                 path = getattr(msg.header, "path", "") or ""
                 interface = getattr(msg.header, "interface", "") or ""
                 member = getattr(msg.header, "member", "") or ""
+
+                LOGGER.debug(
+                    "Signal dispatcher received message #%d: path=%s, interface=%s, member=%s",
+                    message_count,
+                    path,
+                    interface,
+                    member,
+                )
 
                 # Handle PropertiesChanged signals
                 if (
@@ -206,13 +241,18 @@ class _SystemBus:  # pylint: disable=too-many-instance-attributes
                     and interface == SYSTEMD_PROPERTIES_INTERFACE
                 ):
                     self._process_properties_changed(msg, path)
+                else:
+                    LOGGER.debug("Ignoring signal: %s.%s", interface, member)
 
             except Empty:
                 # Timeout - continue loop to check _running flag
                 continue
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 if self._running:  # Only log if not shutting down
-                    LOGGER.debug("Signal dispatcher error: %s", exc)
+                    LOGGER.error("Signal dispatcher error: %s", exc, exc_info=True)
+        LOGGER.info(
+            "Signal dispatcher thread exiting (received %d messages)", message_count
+        )
 
 
 class ProxyObject:  # pylint: disable=too-few-public-methods

@@ -788,8 +788,10 @@ def main() -> None:
 
     # Block main thread until shutdown event is set
     # The Jeepney event loop runs in a background thread
+    # Use a timeout to allow KeyboardInterrupt to be caught
     try:
-        SHUTDOWN_EVENT.wait()
+        while not SHUTDOWN_EVENT.is_set():
+            SHUTDOWN_EVENT.wait(timeout=1.0)
     except KeyboardInterrupt:
         signal_handler(signal.SIGINT, None)
 
