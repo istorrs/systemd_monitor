@@ -24,7 +24,7 @@ from queue import Queue, Empty
 from typing import Callable, Optional, Dict, Any
 
 try:
-    from jeepney import DBusAddress, new_method_call, MatchRule
+    from jeepney import DBusAddress, new_method_call, MatchRule, HeaderFields
     from jeepney.bus_messages import message_bus
 
     JEEPNEY_AVAILABLE = True
@@ -223,10 +223,11 @@ class _SystemBus:  # pylint: disable=too-many-instance-attributes
                 msg = self.signal_queue.get(timeout=0.1)
                 message_count += 1
 
-                # Extract signal information
-                path = getattr(msg.header, "path", "") or ""
-                interface = getattr(msg.header, "interface", "") or ""
-                member = getattr(msg.header, "member", "") or ""
+                # Extract signal information from Jeepney message header
+                # Jeepney stores header fields in msg.header.fields dict
+                path = msg.header.fields.get(HeaderFields.path, "")
+                interface = msg.header.fields.get(HeaderFields.interface, "")
+                member = msg.header.fields.get(HeaderFields.member, "")
 
                 LOGGER.debug(
                     "Signal dispatcher received message #%d: "

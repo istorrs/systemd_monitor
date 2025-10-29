@@ -28,14 +28,25 @@ class MockMessageType:
     method_call = "method_call"
 
 
+class MockHeaderFields:
+    """Mock jeepney.HeaderFields enum."""
+
+    path = 1
+    interface = 2
+    member = 3
+
+
 class MockHeader:
     """Mock message header."""
 
     def __init__(self, message_type="signal", path="", interface="", member=""):
         self.message_type = message_type
-        self.path = path
-        self.interface = interface
-        self.member = member
+        # Jeepney stores header fields in a fields dict with HeaderFields keys
+        self.fields = {
+            MockHeaderFields.path: path,
+            MockHeaderFields.interface: interface,
+            MockHeaderFields.member: member,
+        }
 
 
 class MockMessage:
@@ -75,6 +86,7 @@ mock_proxy_class = MagicMock()
 mock_jeepney = Mock()
 mock_jeepney.DBusAddress = MockDBusAddress
 mock_jeepney.MessageType = MockMessageType
+mock_jeepney.HeaderFields = MockHeaderFields
 mock_jeepney.new_method_call = Mock()
 mock_jeepney.MatchRule = MockMatchRule
 
