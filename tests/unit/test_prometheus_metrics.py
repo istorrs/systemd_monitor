@@ -24,7 +24,7 @@ mock_prometheus.start_http_server = mock_start_http_server
 sys.modules["prometheus_client"] = mock_prometheus
 
 # Now import the module under test
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position,import-error
 from systemd_monitor.prometheus_metrics import (  # noqa: E402
     PrometheusMetrics,
     get_metrics,
@@ -226,7 +226,7 @@ class TestPrometheusMetrics:
     def test_get_metrics_singleton(self):
         """Test get_metrics returns singleton instance."""
         # Clear any existing instance
-        # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel,import-error
         import systemd_monitor.prometheus_metrics as prom_module
 
         prom_module._metrics_instance = None  # pylint: disable=protected-access
