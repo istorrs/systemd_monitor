@@ -3,8 +3,7 @@ Service Monitor for systemd units.
 
 This script monitors a predefined list of systemd services using D-Bus,
 logging their state changes, starts, stops, and crashes to a file.
-It uses GLib.MainLoop for event handling and argparse for command-line
-argument parsing.
+It uses pure Python Jeepney library for D-Bus communication (no C compiler required).
 Counters for starts, stops, and crashes are persisted across script runs
 using a JSON file.
 """
@@ -17,19 +16,15 @@ import signal
 import sys
 import json
 import os
-from functools import partial  # Used for signal_handler binding
+import threading
 from typing import Dict, Any, Optional, List
 
-import dbus
-from dbus.mainloop.glib import DBusGMainLoop
-from gi.repository import GLib  # pylint: disable=no-name-in-module
+# Use pure-Python Jeepney for D-Bus (no C compiler required)
+from systemd_monitor import dbus_shim as dbus  # type: ignore
 
 from systemd_monitor.config import Config
 from systemd_monitor import __version__
 from systemd_monitor.prometheus_metrics import get_metrics
-
-# Set up DBusGMainLoop globally before any D-Bus interaction
-DBusGMainLoop(set_as_default=True)
 
 # Configuration will be loaded from Config module
 # These are module-level variables that will be set by initialize_from_config()
@@ -50,6 +45,9 @@ SYSTEMD_MANAGER_INTERFACE = "org.freedesktop.systemd1.Manager"
 SYSTEMD_UNIT_INTERFACE = "org.freedesktop.systemd1.Unit"
 SYSTEMD_SERVICE_INTERFACE = "org.freedesktop.systemd1.Service"
 SYSTEMD_PROPERTIES_INTERFACE = "org.freedesktop.DBus.Properties"
+
+# Global shutdown event for graceful termination
+SHUTDOWN_EVENT = threading.Event()
 
 # Initialize D-Bus connection
 SYSTEM_BUS = dbus.SystemBus()
@@ -105,9 +103,9 @@ def save_state() -> None:
             json.dump(serializable_states, f, indent=4)
         LOGGER.debug("Service states saved to %s", PERSISTENCE_FILE)
     except IOError as e:
-        LOGGER.error("Error saving service states to %s: %s", PERSISTENCE_FILE, e)
+        LOGGER.exception("Error saving service states to %s: %s", PERSISTENCE_FILE, e)
     except TypeError as e:
-        LOGGER.error("Error serializing service states (check data types): %s", e)
+        LOGGER.exception("Error serializing service states (check data types): %s", e)
 
 
 def load_state() -> None:
@@ -163,15 +161,17 @@ def load_state() -> None:
                     "logged_unloaded": False,
                 }
 
-        # Remove any services from SERVICE_STATES that are no longer in MONITORED_SERVICES
+        # Remove services from SERVICE_STATES that are no longer in
+        # MONITORED_SERVICES
         services_to_remove = [s for s in SERVICE_STATES if s not in MONITORED_SERVICES]
         for service in services_to_remove:
             del SERVICE_STATES[service]
             LOGGER.info("Removed unmonitored service from state: %s", service)
 
     except (IOError, json.JSONDecodeError) as e:
-        LOGGER.error(
-            "Error loading service states from %s: %s. Initializing with default states.",
+        LOGGER.exception(
+            "Error loading service states from %s: %s. "
+            "Initializing with default states.",
             PERSISTENCE_FILE,
             e,
         )
@@ -209,7 +209,8 @@ def handle_properties_changed(  # pylint: disable=too-many-statements
     last_state_info = SERVICE_STATES[service_name]
     last_active_state = last_state_info["last_state"]
 
-    # Important: Do not process if ActiveState hasn't changed, unless it's the very first time.
+    # Important: Do not process if ActiveState hasn't changed, unless
+    # it's the very first time.
     if current_active_state == last_active_state and last_active_state is not None:
         return
 
@@ -294,7 +295,8 @@ def handle_properties_changed(  # pylint: disable=too-many-statements
             )
             LOGGER.info(*log_message)
 
-    # 3. Handle specific transitions for clarity, without affecting counters if already handled
+    # 3. Handle specific transitions for clarity, without affecting counters
+    # if already handled
     elif last_active_state == "active" and current_active_state == "deactivating":
         log_message = (
             "Service %s: %s -> %s (SubState: %s)",
@@ -345,7 +347,8 @@ def handle_properties_changed(  # pylint: disable=too-many-statements
     if current_active_state in ["active", "activating", "reloading"]:
         last_state_info["logged_unloaded"] = False
 
-    # Always update Prometheus state gauge and timestamp (even if counters didn't change)
+    # Always update Prometheus state gauge and timestamp
+    # (even if counters didn't change)
     get_metrics().update_service_state(
         service_name, current_active_state, current_last_change_time / 1000000
     )
@@ -355,26 +358,37 @@ def handle_properties_changed(  # pylint: disable=too-many-statements
         save_state()
 
 
+# pylint: disable=too-many-statements,too-many-branches
 def setup_dbus_monitor() -> bool:  # noqa: C901
     """
     Set up D-Bus signal monitoring for service state changes.
 
-    Loads persistent states, then initializes current states for all monitored services
-    by polling once, and finally subscribes to D-Bus PropertiesChanged signals for each service.
+    Loads persistent states, then initializes current states for all monitored
+    services by polling once, and finally subscribes to D-Bus PropertiesChanged
+    signals for each service.
 
     Returns:
         bool: True if D-Bus monitoring setup failed, False otherwise.
     """
+    LOGGER.debug("Setting up D-Bus monitoring for %d services", len(MONITORED_SERVICES))
+
     # Load persistent states first
     load_state()
+    LOGGER.debug("Loaded persistent state for %d services", len(SERVICE_STATES))
 
     try:
         # First, ensure systemd will emit signals to us
+        LOGGER.debug("About to call MANAGER_INTERFACE.Subscribe()...")
         MANAGER_INTERFACE.Subscribe()
         LOGGER.info("Successfully subscribed to systemd D-Bus signals.")
 
         # Initial logging of service states
+        LOGGER.debug(
+            "Fetching initial service states for %d services...",
+            len(MONITORED_SERVICES),
+        )
         for service_name in MONITORED_SERVICES:
+            LOGGER.debug("Fetching initial state for %s", service_name)
             current_props = _get_initial_service_properties(service_name)
             if current_props:
                 if (
@@ -435,10 +449,27 @@ def setup_dbus_monitor() -> bool:  # noqa: C901
                     state,
                 )
 
+        LOGGER.debug(
+            "Setting up signal subscriptions for %d services...",
+            len(MONITORED_SERVICES),
+        )
         for service_name in MONITORED_SERVICES:
             try:
+                LOGGER.debug("Subscribing to PropertiesChanged for %s", service_name)
                 unit_path = MANAGER_INTERFACE.GetUnit(service_name)
+                LOGGER.debug("Got unit path for %s: %s", service_name, unit_path)
+
+                # Check if GetUnit returned a valid path or an error message
+                if not isinstance(unit_path, str) or not unit_path.startswith("/"):
+                    LOGGER.warning(
+                        "Service %s not loaded or accessible: %s",
+                        service_name,
+                        unit_path,
+                    )
+                    continue
+
                 unit_obj = SYSTEM_BUS.get_object(SYSTEMD_DBUS_SERVICE, str(unit_path))
+                LOGGER.debug("Got unit object for %s", service_name)
                 unit_obj.connect_to_signal(
                     "PropertiesChanged",
                     lambda interface, changed, invalidated, s=service_name: (
@@ -458,8 +489,29 @@ def setup_dbus_monitor() -> bool:  # noqa: C901
                 )
 
     except dbus.exceptions.DBusException as exc:
-        LOGGER.error("Failed to set up D-Bus monitoring: %s", exc)
+        LOGGER.exception("Failed to set up D-Bus monitoring: %s", exc)
+        LOGGER.error("Exception type: %s", type(exc).__name__)
+        LOGGER.error(
+            "This may indicate:\n"
+            "  - D-Bus service is not running (check: systemctl status dbus)\n"
+            "  - Insufficient permissions (try running as root)\n"
+            "  - systemd is not available on this system"
+        )
+        print(f"ERROR: D-Bus connection failed: {exc}", file=sys.stderr)
         return True
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        # Intentionally broad to catch any unexpected errors during setup
+        LOGGER.exception("Unexpected error during D-Bus setup: %s", exc)
+        LOGGER.error("Exception type: %s", type(exc).__name__)
+        import traceback  # pylint: disable=import-outside-toplevel
+
+        LOGGER.error("Traceback:\n%s", traceback.format_exc())
+        print(f"ERROR: Unexpected error: {exc}", file=sys.stderr)
+        return True
+
+    LOGGER.info(
+        "D-Bus monitoring setup completed successfully - ready to receive signals"
+    )
     return False
 
 
@@ -469,6 +521,14 @@ def _get_initial_service_properties(service_name: str) -> Optional[Dict[str, Any
     """
     try:
         unit_path = MANAGER_INTERFACE.GetUnit(service_name)
+
+        # Check if GetUnit returned a valid path or an error message
+        if not isinstance(unit_path, str) or not unit_path.startswith("/"):
+            LOGGER.warning(
+                "Service %s not loaded or accessible: %s", service_name, unit_path
+            )
+            return None
+
         unit_obj = SYSTEM_BUS.get_object(SYSTEMD_DBUS_SERVICE, str(unit_path))
         unit_props = dbus.Interface(unit_obj, SYSTEMD_PROPERTIES_INTERFACE)
 
@@ -487,7 +547,9 @@ def _get_initial_service_properties(service_name: str) -> Optional[Dict[str, Any
             "ExecMainCode": int(exec_main_code),
             "StateChangeTimestamp": int(state_change_timestamp),
         }
-    except dbus.exceptions.DBusException:
+    except dbus.exceptions.DBusException as exc:
+        LOGGER.exception("Failed to set up D-Bus monitoring: %s", exc)
+        LOGGER.error("Exception type: %s", type(exc).__name__)
         return None
 
 
@@ -508,7 +570,7 @@ def initialize_from_config(config: Config) -> None:
     LOGGER.info("Initialized with %d monitored services", len(MONITORED_SERVICES))
 
 
-def signal_handler(_sig: int, _frame: Any, main_loop: GLib.MainLoop) -> None:
+def signal_handler(_sig: int, _frame: Any) -> None:
     """
     Handle termination signals with cleanup. Saves state before exiting.
     """
@@ -519,17 +581,18 @@ def signal_handler(_sig: int, _frame: Any, main_loop: GLib.MainLoop) -> None:
         MANAGER_INTERFACE.Unsubscribe()  # Unsubscribe from global systemd signals
         LOGGER.info("Successfully unsubscribed from systemd D-Bus signals.")
     except dbus.exceptions.DBusException as exc:
-        LOGGER.warning("Failed to unsubscribe from D-Bus: %s", exc)
+        LOGGER.exception("Failed to unsubscribe from D-Bus: %s", exc)
     try:
         SYSTEM_BUS.close()
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        LOGGER.error("Failed to close D-Bus connection: %s", exc)
+        LOGGER.exception("Failed to close D-Bus connection: %s", exc)
 
     # Ensure logs are flushed before exiting
     for handler in LOGGER.handlers:
         handler.flush()
 
-    main_loop.quit()
+    # Signal the main thread to exit
+    SHUTDOWN_EVENT.set()
     sys.exit(0)
 
 
@@ -637,7 +700,70 @@ def _handle_command_actions(
     return False
 
 
-def main() -> None:  # noqa: C901
+def _initialize_prometheus(app_config: Config) -> None:
+    """Initialize Prometheus metrics if enabled."""
+    if not app_config.prometheus_enabled:
+        LOGGER.info("Prometheus metrics disabled by configuration")
+        return
+
+    metrics = get_metrics()
+    if not metrics.enabled:
+        LOGGER.info("Prometheus client not available, metrics disabled")
+        return
+
+    if metrics.start_http_server(app_config.prometheus_port):
+        LOGGER.info("Prometheus metrics enabled on port %d", app_config.prometheus_port)
+        metrics.set_monitor_info(__version__, MONITORED_SERVICES)
+    else:
+        LOGGER.warning("Failed to start Prometheus HTTP server")
+
+
+def _validate_services_configured() -> None:
+    """Check that services are configured, exit with error if not."""
+    if MONITORED_SERVICES:
+        return
+
+    error_msg = (
+        "ERROR: No services configured for monitoring!\n"
+        "Please specify services using:\n"
+        "  --services SERVICE1,SERVICE2,...\n"
+        "Or create a config file with 'monitored_services' list.\n"
+        "Example: systemd-monitor --services sshd.service,cron.service"
+    )
+    print(error_msg, file=sys.stderr)
+    LOGGER.error("No services configured for monitoring")
+    for handler in LOGGER.handlers:
+        handler.flush()
+    sys.exit(1)
+
+
+def _start_monitoring(log_file_path: str) -> None:
+    """Start D-Bus monitoring or exit with error."""
+    LOGGER.info("Starting D-Bus monitoring for %d services...", len(MONITORED_SERVICES))
+    LOGGER.debug("Services: %s", ", ".join(MONITORED_SERVICES))
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    if setup_dbus_monitor():
+        error_msg = (
+            "ERROR: D-Bus monitoring setup failed!\n"
+            f"Check {log_file_path} for details."
+        )
+        print(error_msg, file=sys.stderr)
+        LOGGER.error("D-Bus monitoring setup failed. Exiting.")
+        for handler in LOGGER.handlers:
+            handler.flush()
+        sys.exit(1)
+
+    LOGGER.info("D-Bus monitoring active. Press Ctrl+C to stop.")
+    print(
+        f"Monitoring {len(MONITORED_SERVICES)} services. Press Ctrl+C to stop.",
+        file=sys.stderr,
+    )
+
+
+def main() -> None:
     """Main entry point for the systemd monitor."""
     parser = _create_argument_parser()
     args = parser.parse_args()
@@ -657,41 +783,23 @@ def main() -> None:  # noqa: C901
     log_file_path = args.log_file if args.log_file else app_config.log_file
     _setup_logging(log_file_path, app_config.debug)
 
-    # Initialize Prometheus metrics if enabled
-    if app_config.prometheus_enabled:
-        metrics = get_metrics()
-        if metrics.enabled:
-            if metrics.start_http_server(app_config.prometheus_port):
-                LOGGER.info(
-                    "Prometheus metrics enabled on port %d", app_config.prometheus_port
-                )
-                # Set monitor info
-                metrics.set_monitor_info(__version__, MONITORED_SERVICES)
-            else:
-                LOGGER.warning("Failed to start Prometheus HTTP server")
-        else:
-            LOGGER.info("Prometheus client not available, metrics disabled")
-    else:
-        LOGGER.info("Prometheus metrics disabled by configuration")
+    _initialize_prometheus(app_config)
 
     if args.persistence_file:
         globals()["PERSISTENCE_FILE"] = args.persistence_file
 
     _handle_command_actions(args, log_file_path)
+    _validate_services_configured()
+    _start_monitoring(log_file_path)
 
-    main_loop = GLib.MainLoop()
-
-    signal.signal(signal.SIGINT, partial(signal_handler, main_loop=main_loop))
-    signal.signal(signal.SIGTERM, partial(signal_handler, main_loop=main_loop))
-
-    if setup_dbus_monitor():
-        LOGGER.error("D-Bus monitoring setup failed. Exiting.")
-        sys.exit(1)
-
+    # Block main thread until shutdown event is set
+    # The Jeepney event loop runs in a background thread
+    # Use a timeout to allow KeyboardInterrupt to be caught
     try:
-        main_loop.run()
+        while not SHUTDOWN_EVENT.is_set():
+            SHUTDOWN_EVENT.wait(timeout=1.0)
     except KeyboardInterrupt:
-        signal_handler(signal.SIGINT, None, main_loop)
+        signal_handler(signal.SIGINT, None)
 
 
 if __name__ == "__main__":

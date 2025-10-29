@@ -1,5 +1,19 @@
 # Migration Plan: Jeepney + Prometheus
 
+> **⚠️ HISTORICAL DOCUMENT**
+>
+> This document was written during the planning phase in October 2024.
+> **The migration to Jeepney has been COMPLETED** as of October 2025.
+>
+> The package now uses:
+> - ✅ Jeepney (pure Python D-Bus) - 100% complete
+> - ✅ Prometheus metrics - 100% complete
+> - ✅ No C dependencies (dbus-python/PyGObject removed)
+>
+> This document is retained for historical reference only.
+
+---
+
 ## Executive Summary
 
 **Question:** Can Jeepney be a drop-in replacement for dbus-python?

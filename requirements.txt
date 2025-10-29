@@ -1,3 +1,5 @@
-dbus-python>=1.2.0
-PyGObject>=3.36.0
+# D-Bus library - Pure Python, no C compiler required
+jeepney>=0.8.0
+
+# Metrics export
 prometheus-client>=0.14.0 

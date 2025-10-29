@@ -1,0 +1,16 @@
+include README.md
+include LICENSE
+include CHANGELOG.md
+include requirements.txt
+include requirements-ci.txt
+include requirements-dev.txt
+include config.json.example
+include systemd-monitor.service
+recursive-include systemd_monitor *.py
+recursive-exclude tests *
+recursive-exclude venv *
+recursive-exclude htmlcov *
+recursive-exclude junit *
+recursive-exclude .pytest_cache *
+global-exclude *.pyc
+global-exclude __pycache__

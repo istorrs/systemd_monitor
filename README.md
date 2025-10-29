@@ -8,11 +8,13 @@
 *   **Persistent State Tracking**: Counts of starts, stops, and crashes are persisted to JSON and survive script restarts
 *   **Real-Time Logging**: Logs all service state changes with timestamps to rotating log files
 *   **Prometheus Metrics**: Built-in metrics exporter for monitoring with Prometheus/Grafana
+*   **Pure Python Implementation**: 100% pure Python using Jeepney - no C compiler required!
+*   **Zero Build Dependencies**: Works on embedded systems, Alpine Linux, and environments without build tools
 *   **Crash Detection**: Identifies and logs service crashes with exit codes and signals
 *   **Flexible Configuration**: Supports configuration via JSON files and command-line arguments
 *   **Configurable Service List**: Monitor any set of systemd services via config file or CLI
 *   **Clean Architecture**: Separated configuration module (`config.py`) for better code organization
-*   **Comprehensive Testing**: **99 unit tests** with **96% code coverage** - all tests run without dbus!
+*   **Comprehensive Testing**: **133 unit tests** with **96% code coverage** - all tests run without dbus!
 *   **Code Quality**: 100% pylint compliant with comprehensive pre-commit hooks
 *   **CI/CD Pipeline**: Full GitHub Actions workflow with test result visualization
 *   **Graceful Shutdown**: Handles signals (SIGINT, SIGTERM) to save state and exit cleanly
@@ -226,15 +228,21 @@ systemd_service_state == 1
 ## Prerequisites
 
 *   Python 3.8+ (tested on 3.8, 3.9, 3.10, 3.11)
-*   `python-dbus` (or `python3-dbus`)
-*   `python-gi` (or `python3-gi`, `gir1.2-glib-2.0`)
-*   `prometheus-client` (optional, for metrics export)
+*   **Pure Python dependencies only** - no C compiler required!
+*   `jeepney>=0.8.0` - Pure Python D-Bus library (auto-installed)
+*   `prometheus-client>=0.14.0` - Metrics export (optional)
 
-Install on Debian-based systems:
-```bash
-sudo apt-get update
-sudo apt-get install python3 python3-dbus python3-gi gir1.2-glib-2.0
-```
+### Why Pure Python?
+
+This monitor uses **Jeepney**, a pure Python D-Bus library, making it perfect for:
+- **Embedded systems** without build tools
+- **Alpine Linux** and minimal container images
+- **CI/CD environments** without system dependencies
+- **Quick deployments** without compiling native extensions
+
+### Performance Note
+
+Jeepney is a pure Python implementation, which means it's slightly slower than C-based D-Bus libraries, but this is negligible for monitoring typical service counts (10-100 services). The event-driven architecture ensures efficient resource usage even with dozens of monitored services.
 
 ## Installation
 
@@ -250,6 +258,10 @@ cd systemd_monitor
 ```bash
 pip install -e .
 ```
+
+This installs:
+- `jeepney>=0.8.0` - Pure Python D-Bus library
+- `prometheus-client>=0.14.0` - Metrics export
 
 ### Development Installation
 
@@ -433,7 +445,7 @@ The project has a comprehensive GitHub Actions CI/CD pipeline:
 - ✅ Security scanning
 - ✅ Automated quality enforcement
 
-The CI/CD workflow uses system-installed dbus packages (`python3-dbus`, `python3-gi`) with `PYTHONPATH` configuration to avoid build issues, but the tests themselves use mocked dependencies.
+The CI/CD workflow runs entirely with pure Python dependencies (Jeepney) - no system packages required. All tests use mocked D-Bus dependencies for maximum portability.
 
 ## Troubleshooting
 
@@ -506,7 +518,7 @@ If you see D-Bus connection errors:
 ### Testing Strategy
 
 **Unit Tests** (`tests/test_*.py`):
-- Mock all external dependencies (dbus, GLib)
+- Mock all external dependencies (Jeepney D-Bus, systemd)
 - Test business logic independently
 - Fast execution (< 1 second)
 - Run everywhere (no system dependencies)
@@ -528,16 +540,17 @@ MIT License - see LICENSE file for details.
 - ✅ Config.py module integration
 - ✅ GitHub Actions CI/CD pipeline
 - ✅ Comprehensive type hints
-- ✅ 77 unit tests with mocking (99% coverage!)
+- ✅ 133 unit tests with mocking (96% coverage!)
 - ✅ Pre-commit hooks (5 quality gates)
 - ✅ Test result visualization
 - ✅ Security scanning
+- ✅ Prometheus metrics export
+- ✅ Pure Python Jeepney D-Bus implementation (no C compiler required!)
 
 **In Progress:**
 - 🔄 Integration test suite
 
 **Planned:**
-- 📋 Prometheus metrics export
 - 📋 Web dashboard for visualization
 - 📋 Alerting capabilities
 - 📋 Configuration hot-reload

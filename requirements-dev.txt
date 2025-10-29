@@ -11,3 +11,4 @@ bandit>=1.7.0
 safety>=2.0
 setuptools_scm>=6.2
 prometheus-client>=0.14.0
+jeepney>=0.8.0
