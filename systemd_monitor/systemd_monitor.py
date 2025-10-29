@@ -353,7 +353,8 @@ def handle_properties_changed(  # pylint: disable=too-many-statements
         save_state()
 
 
-def setup_dbus_monitor() -> bool:  # noqa: C901 # pylint: disable=too-many-statements
+# pylint: disable=too-many-statements,too-many-branches
+def setup_dbus_monitor() -> bool:  # noqa: C901
     """
     Set up D-Bus signal monitoring for service state changes.
 
@@ -451,6 +452,16 @@ def setup_dbus_monitor() -> bool:  # noqa: C901 # pylint: disable=too-many-state
                 LOGGER.debug("Subscribing to PropertiesChanged for %s", service_name)
                 unit_path = MANAGER_INTERFACE.GetUnit(service_name)
                 LOGGER.debug("Got unit path for %s: %s", service_name, unit_path)
+
+                # Check if GetUnit returned a valid path or an error message
+                if not isinstance(unit_path, str) or not unit_path.startswith("/"):
+                    LOGGER.warning(
+                        "Service %s not loaded or accessible: %s",
+                        service_name,
+                        unit_path,
+                    )
+                    continue
+
                 unit_obj = SYSTEM_BUS.get_object(SYSTEMD_DBUS_SERVICE, str(unit_path))
                 LOGGER.debug("Got unit object for %s", service_name)
                 unit_obj.connect_to_signal(
@@ -504,6 +515,14 @@ def _get_initial_service_properties(service_name: str) -> Optional[Dict[str, Any
     """
     try:
         unit_path = MANAGER_INTERFACE.GetUnit(service_name)
+
+        # Check if GetUnit returned a valid path or an error message
+        if not isinstance(unit_path, str) or not unit_path.startswith("/"):
+            LOGGER.warning(
+                "Service %s not loaded or accessible: %s", service_name, unit_path
+            )
+            return None
+
         unit_obj = SYSTEM_BUS.get_object(SYSTEMD_DBUS_SERVICE, str(unit_path))
         unit_props = dbus.Interface(unit_obj, SYSTEMD_PROPERTIES_INTERFACE)
 

@@ -142,16 +142,22 @@ class _SystemBus:  # pylint: disable=too-many-instance-attributes
 
     def _escape_unit(self, name: str) -> str:
         """Escape systemd unit name for D-Bus path."""
-        # Systemd unit name escaping rules
+        # Systemd unit name escaping rules (order matters!)
         result = name
-        for char, escaped in [(".", "_2e"), ("-", "_2d"), ("/", "_2f")]:
+        for char, escaped in [("_", "_5f"), (".", "_2e"), ("-", "_2d"), ("/", "_2f")]:
             result = result.replace(char, escaped)
         return result
 
     def _unescape_unit(self, escaped: str) -> str:
         """Unescape systemd unit name from D-Bus path."""
         result = escaped
-        for escaped_str, char in [("_2e", "."), ("_2d", "-"), ("_2f", "/")]:
+        # Unescape in reverse order to handle overlapping patterns
+        for escaped_str, char in [
+            ("_2f", "/"),
+            ("_2d", "-"),
+            ("_2e", "."),
+            ("_5f", "_"),
+        ]:
             result = result.replace(escaped_str, char)
         return result
 

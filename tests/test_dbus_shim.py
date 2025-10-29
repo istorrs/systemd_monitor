@@ -213,6 +213,14 @@ class TestSystemBus:
         assert bus._escape_unit("nginx.service") == "nginx_2eservice"
         assert bus._escape_unit("my-app.service") == "my_2dapp_2eservice"
         assert bus._escape_unit("path/to/unit") == "path_2fto_2funit"
+        assert (
+            bus._escape_unit("wps_button_monitor.service")
+            == "wps_5fbutton_5fmonitor_2eservice"
+        )
+        assert (
+            bus._escape_unit("setup_cell_connect.service")
+            == "setup_5fcell_5fconnect_2eservice"
+        )
 
         bus.close()
 
@@ -223,6 +231,14 @@ class TestSystemBus:
         assert bus._unescape_unit("nginx_2eservice") == "nginx.service"
         assert bus._unescape_unit("my_2dapp_2eservice") == "my-app.service"
         assert bus._unescape_unit("path_2fto_2funit") == "path/to/unit"
+        assert (
+            bus._unescape_unit("wps_5fbutton_5fmonitor_2eservice")
+            == "wps_button_monitor.service"
+        )
+        assert (
+            bus._unescape_unit("setup_5fcell_5fconnect_2eservice")
+            == "setup_cell_connect.service"
+        )
 
         bus.close()
 
