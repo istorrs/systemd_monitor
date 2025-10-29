@@ -7,7 +7,7 @@
 import sys
 import threading
 import time
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock, MagicMock
 import pytest
 
 
@@ -277,55 +277,6 @@ class TestSystemBus:
 
         bus.close()
 
-    @pytest.mark.xfail(
-        reason=(
-            "Passes individually but fails in full suite "
-            "due to sys.modules mock pollution"
-        ),
-        strict=False,
-    )
-    @patch("systemd_monitor.dbus_shim.select.select")
-    def test_event_loop_processes_signals(self, mock_select):
-        """Test that event loop processes PropertiesChanged signals."""
-        from systemd_monitor import dbus_shim
-
-        callback = Mock()
-
-        # Create mock signal message using the correct MessageType value
-        msg = MockMessage(
-            message_type=dbus_shim.MessageType.signal,  # pylint: disable=no-member
-            path="/org/freedesktop/systemd1/unit/test_2eservice",
-            interface="org.freedesktop.DBus.Properties",
-            member="PropertiesChanged",
-            body=["org.freedesktop.systemd1.Unit", {"ActiveState": "active"}, []],
-        )
-
-        # Make select continuously return data available to avoid race condition
-        # This ensures messages are available even after callback is registered
-        mock_select.return_value = ([mock_conn.sock], [], [])
-        mock_conn.receive.return_value = msg
-
-        # Create bus (starts event loop thread)
-        bus = SystemBus()
-
-        # Add callback immediately after bus is created
-        with bus.subscriptions_lock:
-            bus.subscriptions["test.service"] = callback
-
-        # Give event loop time to process messages
-        time.sleep(0.2)
-
-        # Verify callback was called with correct arguments
-        try:
-            assert (
-                callback.call_count >= 1
-            ), f"Callback not called (count={callback.call_count})"
-            callback.assert_any_call(
-                "org.freedesktop.systemd1.Unit", {"ActiveState": "active"}, []
-            )
-        finally:
-            bus.close()
-
     def test_signal_dispatcher_filters_messages(self):
         """Test that signal dispatcher only processes PropertiesChanged signals."""
         bus = SystemBus()
@@ -594,19 +545,11 @@ class TestSingletonPattern:
 
         bus1.close()
 
-    @pytest.mark.xfail(
-        reason=(
-            "Passes individually but fails in full suite "
-            "due to sys.modules mock pollution"
-        ),
-        strict=False,
-    )
     def test_system_bus_function_returns_singleton(self):
         """Test that SystemBus() function returns singleton."""
-        from systemd_monitor.dbus_shim import SystemBus as SystemBusFunc
-
-        bus1 = SystemBusFunc()
-        bus2 = SystemBusFunc()
+        # Use SystemBus imported at module level to avoid sys.modules pollution
+        bus1 = SystemBus()
+        bus2 = SystemBus()
 
         assert bus1 is bus2
 

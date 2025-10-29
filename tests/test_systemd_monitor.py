@@ -19,16 +19,17 @@ from unittest.mock import patch, MagicMock, mock_open
 import pytest
 
 
-# Create a proper DBusException class that can be caught
-class MockDBusException(Exception):
-    """Mock DBus exception for testing."""
+# Import the real DBusException from dbus_shim (which test_dbus_shim has already imported)
+# This ensures exception class identity works correctly across the test suite
+# pylint: disable=wrong-import-position
+from systemd_monitor.dbus_shim import DBusException  # noqa: E402
 
 
-# Create a mock exceptions module with our real exception class
+# Create a mock exceptions module with the REAL exception class
 class MockDBusExceptionsModule:
     """Mock dbus.exceptions module."""
 
-    DBusException = MockDBusException
+    DBusException = DBusException
 
 
 # Mock dbus_shim BEFORE importing systemd_monitor
@@ -40,7 +41,7 @@ class MockDBusShimModule:
     SystemBus = MagicMock
     ProxyObject = MagicMock
     Interface = MagicMock
-    DBusException = MockDBusException
+    DBusException = DBusException
     get_system_bus = MagicMock
     exceptions = MockDBusExceptionsModule()
 
@@ -512,17 +513,10 @@ class TestSetupDBusMonitor:
             mock_manager.Subscribe.assert_called_once()
             assert result is False  # False means success
 
-    @pytest.mark.xfail(
-        reason=(
-            "Passes individually but fails in full suite "
-            "due to exception class identity"
-        ),
-        strict=False,
-    )
     def test_setup_handles_dbus_exception(self):
         """Test that setup_dbus_monitor handles D-Bus exceptions."""
-        # Use the MockDBusException that's been set up in the module mock
-        mock_exception = MockDBusException("DBus connection failed")
+        # Use the real DBusException class to ensure isinstance() works correctly
+        mock_exception = DBusException("DBus connection failed")
 
         with patch.object(systemd_monitor, "load_state"), patch.object(
             systemd_monitor, "MANAGER_INTERFACE"
@@ -594,16 +588,10 @@ class TestSetupDBusMonitor:
             # Should still log initial state
             assert mock_log.called
 
-    @pytest.mark.xfail(
-        reason=(
-            "Passes individually but fails in full suite "
-            "due to exception class identity"
-        ),
-        strict=False,
-    )
     def test_setup_handles_service_subscribe_exception(self):
         """Test that setup handles exception when subscribing to individual service."""
-        mock_exception = MockDBusException("Service not found")
+        # Use the real DBusException class to ensure isinstance() works correctly
+        mock_exception = DBusException("Service not found")
 
         with patch.object(systemd_monitor, "load_state"), patch.object(
             systemd_monitor, "MANAGER_INTERFACE"
@@ -656,17 +644,10 @@ class TestGetInitialServiceProperties:
                 assert result["ActiveState"] == "active"
                 assert result["SubState"] == "running"
 
-    @pytest.mark.xfail(
-        reason=(
-            "Passes individually but fails in full suite "
-            "due to exception class identity"
-        ),
-        strict=False,
-    )
     def test_get_properties_handles_exception(self):
         """Test property retrieval handles exceptions."""
-        # Use the MockDBusException
-        mock_exception = MockDBusException("Failed to get unit")
+        # Use the real DBusException class to ensure isinstance() works correctly
+        mock_exception = DBusException("Failed to get unit")
 
         with patch.object(systemd_monitor, "MANAGER_INTERFACE") as mock_manager:
             mock_manager.GetUnit.side_effect = mock_exception
@@ -707,22 +688,15 @@ class TestSignalHandler:
             systemd_monitor.signal_handler(signal.SIGINT, None)
             mock_manager.Unsubscribe.assert_called_once()
 
-    @pytest.mark.xfail(
-        reason=(
-            "Passes individually but fails in full suite "
-            "due to exception class identity"
-        ),
-        strict=False,
-    )
     def test_signal_handler_handles_unsub_error(self):
         """Test that signal handler handles unsubscribe errors."""
-        # Use the MockDBusException
-        mock_exception = MockDBusException("Failed to unsubscribe")
+        # Use the real DBusException class to ensure isinstance() works correctly
+        mock_exception = DBusException("Failed to unsubscribe")
 
         with patch.object(systemd_monitor, "save_state"), patch.object(
             systemd_monitor, "MANAGER_INTERFACE"
         ) as mock_manager, patch.object(systemd_monitor, "SYSTEM_BUS"), patch.object(
-            systemd_monitor.LOGGER, "warning"
+            systemd_monitor.LOGGER, "exception"
         ) as mock_logger, patch.object(
             systemd_monitor, "SHUTDOWN_EVENT"
         ), patch(
@@ -730,7 +704,7 @@ class TestSignalHandler:
         ):
             mock_manager.Unsubscribe.side_effect = mock_exception
             systemd_monitor.signal_handler(signal.SIGINT, None)
-            # Should log warning but still exit
+            # Should log exception but still exit
             assert mock_logger.called
 
     def test_signal_handler_handles_bus_close_error(self):
