@@ -445,7 +445,7 @@ The project has a comprehensive GitHub Actions CI/CD pipeline:
 - ✅ Security scanning
 - ✅ Automated quality enforcement
 
-The CI/CD workflow uses system-installed dbus packages (`python3-dbus`, `python3-gi`) with `PYTHONPATH` configuration to avoid build issues, but the tests themselves use mocked dependencies.
+The CI/CD workflow runs entirely with pure Python dependencies (Jeepney) - no system packages required. All tests use mocked D-Bus dependencies for maximum portability.
 
 ## Troubleshooting
 
