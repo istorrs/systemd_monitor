@@ -374,7 +374,20 @@ class Interface:
             )
             # DBusRouter.send_and_get_reply() is thread-safe
             reply = self.proxy_obj.router.send_and_get_reply(msg)
-            return reply.body[0] if reply.body else None
+
+            # D-Bus Properties.Get returns a variant - unwrap it
+            result = reply.body[0] if reply.body else None
+            # Unwrap variant tuples: ('i', 5) or (5,) → 5
+            while isinstance(result, tuple) and len(result) <= 2:
+                if len(result) == 2:
+                    # Format: (signature, value)
+                    result = result[1]
+                elif len(result) == 1:
+                    # Format: (value,)
+                    result = result[0]
+                else:
+                    break
+            return result
         except Exception as exc:  # pylint: disable=broad-exception-caught
             raise DBusException(f"Get property failed: {exc}") from exc
 
