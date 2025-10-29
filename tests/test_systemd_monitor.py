@@ -8,7 +8,8 @@ dbus/systemd installation.
 
 # pylint: disable=import-error,attribute-defined-outside-init
 # pylint: disable=import-outside-toplevel,protected-access,too-few-public-methods
-# pylint: disable=too-many-lines,invalid-name  # Test files can be long for comprehensive coverage
+# pylint: disable=too-many-lines,invalid-name,duplicate-code
+# Test files can be long for comprehensive coverage
 import sys
 import os
 import json
@@ -56,7 +57,10 @@ class TestStateFunctions:
     """Test state management functions."""
 
     def test_save_state_creates_directory(self):
-        """Test that save_state creates the persistence directory if it doesn't exist."""
+        """
+        Test that save_state creates the persistence directory if it
+        doesn't exist.
+        """
         with patch("os.makedirs") as mock_makedirs, patch(
             "builtins.open", mock_open()
         ) as mock_file, patch.object(
@@ -509,7 +513,10 @@ class TestSetupDBusMonitor:
             assert result is False  # False means success
 
     @pytest.mark.xfail(
-        reason="Passes individually but fails in full suite due to exception class identity",
+        reason=(
+            "Passes individually but fails in full suite "
+            "due to exception class identity"
+        ),
         strict=False,
     )
     def test_setup_handles_dbus_exception(self):
@@ -588,7 +595,10 @@ class TestSetupDBusMonitor:
             assert mock_log.called
 
     @pytest.mark.xfail(
-        reason="Passes individually but fails in full suite due to exception class identity",
+        reason=(
+            "Passes individually but fails in full suite "
+            "due to exception class identity"
+        ),
         strict=False,
     )
     def test_setup_handles_service_subscribe_exception(self):
@@ -647,7 +657,10 @@ class TestGetInitialServiceProperties:
                 assert result["SubState"] == "running"
 
     @pytest.mark.xfail(
-        reason="Passes individually but fails in full suite due to exception class identity",
+        reason=(
+            "Passes individually but fails in full suite "
+            "due to exception class identity"
+        ),
         strict=False,
     )
     def test_get_properties_handles_exception(self):
@@ -695,7 +708,10 @@ class TestSignalHandler:
             mock_manager.Unsubscribe.assert_called_once()
 
     @pytest.mark.xfail(
-        reason="Passes individually but fails in full suite due to exception class identity",
+        reason=(
+            "Passes individually but fails in full suite "
+            "due to exception class identity"
+        ),
         strict=False,
     )
     def test_signal_handler_handles_unsub_error(self):
@@ -1062,7 +1078,8 @@ class TestConstants:
 
     def test_persistence_file_path(self):
         """Test that persistence file path is properly constructed."""
-        # Note: PERSISTENCE_FILE can be modified by main(), so check if it contains .json
+        # Note: PERSISTENCE_FILE can be modified by main(), so check if
+        # it contains .json
         assert systemd_monitor.PERSISTENCE_FILE.endswith(".json")
         # Verify default value has the expected structure
         default_file = os.path.join(

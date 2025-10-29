@@ -1,9 +1,10 @@
 """
 D-Bus compatibility shim using Jeepney.
 
-This module provides a compatibility layer that mimics the dbus-python API using Jeepney,
-a pure-Python D-Bus implementation. This allows the systemd monitor to run on systems
-without C compilers where dbus-python cannot be installed.
+This module provides a compatibility layer that mimics the dbus-python API
+using Jeepney, a pure-Python D-Bus implementation. This allows the systemd
+monitor to run on systems without C compilers where dbus-python cannot be
+installed.
 
 The API is designed to be a drop-in replacement for the subset of dbus-python used by
 systemd_monitor.py, including:
@@ -228,7 +229,8 @@ class _SystemBus:  # pylint: disable=too-many-instance-attributes
                 member = getattr(msg.header, "member", "") or ""
 
                 LOGGER.debug(
-                    "Signal dispatcher received message #%d: path=%s, interface=%s, member=%s",
+                    "Signal dispatcher received message #%d: "
+                    "path=%s, interface=%s, member=%s",
                     message_count,
                     path,
                     interface,

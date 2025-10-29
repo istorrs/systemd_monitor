@@ -13,6 +13,11 @@ This test runs inside a systemd-enabled container and verifies:
 Requires: systemd running in container with test services installed
 """
 
+# pylint: disable=too-many-locals,too-many-branches,too-many-statements
+# pylint: disable=import-error,broad-exception-caught,unspecified-encoding
+# pylint: disable=import-outside-toplevel,no-else-return,duplicate-code
+# Integration tests have different quality standards
+
 import os
 import sys
 import time
@@ -21,7 +26,7 @@ import subprocess
 import requests
 
 
-class Colors:
+class Colors:  # pylint: disable=too-few-public-methods
     """ANSI color codes for output."""
 
     GREEN = "\033[92m"
@@ -157,7 +162,8 @@ def main():  # noqa: C901
             result = run_cmd(f"ps -p {monitor_pid}", check=False)
             if result.returncode == 0:
                 print(
-                    f"  {Colors.GREEN}✓ Monitor started (PID: {monitor_pid}){Colors.RESET}"
+                    f"  {Colors.GREEN}✓ Monitor started "
+                    f"(PID: {monitor_pid}){Colors.RESET}"
                 )
                 tests_passed += 1
             else:
@@ -239,7 +245,8 @@ def main():  # noqa: C901
             description="restart.service activity",
         ):
             print(
-                f"  {Colors.GREEN}✓ Auto-restart service activity detected{Colors.RESET}"
+                f"  {Colors.GREEN}✓ Auto-restart service activity "
+                f"detected{Colors.RESET}"
             )
             tests_passed += 1
         else:
@@ -272,7 +279,8 @@ def main():  # noqa: C901
                     tests_failed += 1
             else:
                 print(
-                    f"  {Colors.RED}✗ stable.service not in persisted state{Colors.RESET}"
+                    f"  {Colors.RED}✗ stable.service not in persisted "
+                    f"state{Colors.RESET}"
                 )
                 tests_failed += 1
         else:
@@ -297,14 +305,16 @@ def main():  # noqa: C901
                 tests_passed += 1  # Still pass, might be timing
         else:
             print(
-                f"  {Colors.YELLOW}⚠ Prometheus metrics not available (optional){Colors.RESET}"
+                f"  {Colors.YELLOW}⚠ Prometheus metrics not available "
+                f"(optional){Colors.RESET}"
             )
             # Don't fail - metrics are optional
             tests_passed += 1
 
         # Test 11: Monitor restart and state reload
         print(
-            f"\n{Colors.BLUE}Test 11: Test monitor restart and state reload{Colors.RESET}"
+            f"\n{Colors.BLUE}Test 11: Test monitor restart and state "
+            f"reload{Colors.RESET}"
         )
 
         # Stop the monitor
@@ -329,7 +339,8 @@ def main():  # noqa: C901
             tests_passed += 1
         else:
             print(
-                f"  {Colors.YELLOW}⚠ State reload message not found (may still work){Colors.RESET}"
+                f"  {Colors.YELLOW}⚠ State reload message not found "
+                f"(may still work){Colors.RESET}"
             )
             tests_passed += 1  # Don't fail on log message
 

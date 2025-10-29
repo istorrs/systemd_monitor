@@ -161,7 +161,8 @@ def load_state() -> None:
                     "logged_unloaded": False,
                 }
 
-        # Remove any services from SERVICE_STATES that are no longer in MONITORED_SERVICES
+        # Remove services from SERVICE_STATES that are no longer in
+        # MONITORED_SERVICES
         services_to_remove = [s for s in SERVICE_STATES if s not in MONITORED_SERVICES]
         for service in services_to_remove:
             del SERVICE_STATES[service]
@@ -169,7 +170,8 @@ def load_state() -> None:
 
     except (IOError, json.JSONDecodeError) as e:
         LOGGER.exception(
-            "Error loading service states from %s: %s. Initializing with default states.",
+            "Error loading service states from %s: %s. "
+            "Initializing with default states.",
             PERSISTENCE_FILE,
             e,
         )
@@ -207,7 +209,8 @@ def handle_properties_changed(  # pylint: disable=too-many-statements
     last_state_info = SERVICE_STATES[service_name]
     last_active_state = last_state_info["last_state"]
 
-    # Important: Do not process if ActiveState hasn't changed, unless it's the very first time.
+    # Important: Do not process if ActiveState hasn't changed, unless
+    # it's the very first time.
     if current_active_state == last_active_state and last_active_state is not None:
         return
 
@@ -292,7 +295,8 @@ def handle_properties_changed(  # pylint: disable=too-many-statements
             )
             LOGGER.info(*log_message)
 
-    # 3. Handle specific transitions for clarity, without affecting counters if already handled
+    # 3. Handle specific transitions for clarity, without affecting counters
+    # if already handled
     elif last_active_state == "active" and current_active_state == "deactivating":
         log_message = (
             "Service %s: %s -> %s (SubState: %s)",
@@ -343,7 +347,8 @@ def handle_properties_changed(  # pylint: disable=too-many-statements
     if current_active_state in ["active", "activating", "reloading"]:
         last_state_info["logged_unloaded"] = False
 
-    # Always update Prometheus state gauge and timestamp (even if counters didn't change)
+    # Always update Prometheus state gauge and timestamp
+    # (even if counters didn't change)
     get_metrics().update_service_state(
         service_name, current_active_state, current_last_change_time / 1000000
     )
@@ -358,8 +363,9 @@ def setup_dbus_monitor() -> bool:  # noqa: C901
     """
     Set up D-Bus signal monitoring for service state changes.
 
-    Loads persistent states, then initializes current states for all monitored services
-    by polling once, and finally subscribes to D-Bus PropertiesChanged signals for each service.
+    Loads persistent states, then initializes current states for all monitored
+    services by polling once, and finally subscribes to D-Bus PropertiesChanged
+    signals for each service.
 
     Returns:
         bool: True if D-Bus monitoring setup failed, False otherwise.

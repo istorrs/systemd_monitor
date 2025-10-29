@@ -1,8 +1,8 @@
 """Unit tests for D-Bus shim layer (Jeepney compatibility)."""
 
 # pylint: disable=too-few-public-methods,too-many-arguments
-# pylint: disable=import-outside-toplevel,protected-access,attribute-defined-outside-init
-# pylint: disable=reimported,import-error
+# pylint: disable=import-outside-toplevel,protected-access
+# pylint: disable=attribute-defined-outside-init,reimported,import-error
 
 import sys
 import threading
@@ -266,7 +266,10 @@ class TestSystemBus:
         bus.close()
 
     @pytest.mark.xfail(
-        reason="Passes individually but fails in full suite due to sys.modules mock pollution",
+        reason=(
+            "Passes individually but fails in full suite "
+            "due to sys.modules mock pollution"
+        ),
         strict=False,
     )
     @patch("systemd_monitor.dbus_shim.select.select")
@@ -418,7 +421,10 @@ class TestProxyObject:
         assert self.bus.subscriptions["test.service"] is callback
 
     def test_connect_to_signal_no_duplicate_match_rules(self):
-        """Test that connect_to_signal only registers callback (filter already set up)."""
+        """
+        Test that connect_to_signal only registers callback
+        (filter already set up).
+        """
         obj = ProxyObject(
             mock_router,
             "org.test.Service",
@@ -577,7 +583,10 @@ class TestSingletonPattern:
         bus1.close()
 
     @pytest.mark.xfail(
-        reason="Passes individually but fails in full suite due to sys.modules mock pollution",
+        reason=(
+            "Passes individually but fails in full suite "
+            "due to sys.modules mock pollution"
+        ),
         strict=False,
     )
     def test_system_bus_function_returns_singleton(self):
