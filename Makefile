@@ -52,4 +52,4 @@ run: ## Run the systemd monitor
 	systemd-monitor
 
 run-debug: ## Run the systemd monitor with debug logging
-	systemd-monitor --debug 
+	systemd-monitor --debug

@@ -2,4 +2,4 @@
 jeepney>=0.8.0
 
 # Metrics export
-prometheus-client>=0.14.0 
+prometheus-client>=0.14.0
