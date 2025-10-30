@@ -1,2 +1,0 @@
-[console_scripts]
-systemd-monitor = systemd_monitor.systemd_monitor:main

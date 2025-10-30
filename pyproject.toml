@@ -104,4 +104,4 @@ addopts = [
 [tool.setuptools_scm]
 write_to = "systemd_monitor/_version.py"
 version_scheme = "post-release"
-local_scheme = "node-and-date" 
+local_scheme = "node-and-date"
