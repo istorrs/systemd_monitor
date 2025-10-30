@@ -19,7 +19,8 @@ from unittest.mock import patch, MagicMock, mock_open
 import pytest
 
 
-# Import the real DBusException from dbus_shim (which test_dbus_shim has already imported)
+# Import the real DBusException from dbus_shim
+# (which test_dbus_shim has already imported)
 # This ensures exception class identity works correctly across the test suite
 # pylint: disable=wrong-import-position
 from systemd_monitor.dbus_shim import DBusException  # noqa: E402
