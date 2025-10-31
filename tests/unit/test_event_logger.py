@@ -359,8 +359,7 @@ class TestServiceEventLogger:
                 )
             logger.close()
 
-            # Check that backup files were created
-            backup1 = Path(tmpdir) / "events.jsonl.1"
+            # Check that main log file exists
             assert log_file.exists()
             # Rotation may or may not create backup depending on timing
             # Just verify main file exists and contains valid JSON

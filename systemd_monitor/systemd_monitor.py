@@ -194,7 +194,8 @@ def load_state() -> None:
         }
 
 
-def handle_properties_changed(  # pylint: disable=too-many-statements,too-many-branches
+# pylint: disable=too-many-statements,too-many-branches
+def handle_properties_changed(  # noqa: C901
     service_name: str, _interface: str, changed: Dict[str, Any], _invalidated: List[str]
 ) -> None:
     """
