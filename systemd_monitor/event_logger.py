@@ -76,7 +76,7 @@ class ServiceEventLogger:
         self.logger.addHandler(self.handler)
         self.logger.propagate = False  # Don't propagate to root logger
 
-    def log_event(  # pylint: disable=too-many-arguments
+    def log_event(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         event_type: str,
         service: str,
