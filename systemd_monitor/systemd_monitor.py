@@ -25,6 +25,7 @@ from systemd_monitor import dbus_shim as dbus  # type: ignore
 from systemd_monitor.config import Config
 from systemd_monitor import __version__
 from systemd_monitor.prometheus_metrics import get_metrics
+from systemd_monitor.event_logger import ServiceEventLogger
 
 # Configuration will be loaded from Config module
 # These are module-level variables that will be set by initialize_from_config()
@@ -78,6 +79,10 @@ FORMATTER = logging.Formatter("%(asctime)s - [%(levelname)s] %(message)s")
 file_handler.setFormatter(FORMATTER)
 LOGGER.addHandler(file_handler)
 # --- End logging setup ---
+
+# Event logger for JSON Lines logging (initialized in initialize_from_config)
+# pylint: disable=invalid-name
+EVENT_LOGGER = None  # type: Optional[ServiceEventLogger]
 
 
 def save_state() -> None:
@@ -189,7 +194,7 @@ def load_state() -> None:
         }
 
 
-def handle_properties_changed(  # pylint: disable=too-many-statements
+def handle_properties_changed(  # pylint: disable=too-many-statements,too-many-branches
     service_name: str, _interface: str, changed: Dict[str, Any], _invalidated: List[str]
 ) -> None:
     """
@@ -255,6 +260,19 @@ def handle_properties_changed(  # pylint: disable=too-many-statements
         LOGGER.info(*log_message)
         # Update Prometheus metrics
         get_metrics().increment_starts(service_name)
+        # Log structured event
+        if EVENT_LOGGER:
+            EVENT_LOGGER.log_event(
+                event_type="start",
+                service=service_name,
+                from_state=last_active_state,
+                to_state=current_active_state,
+                counters={
+                    "starts": last_state_info["starts"],
+                    "stops": last_state_info["stops"],
+                    "crashes": last_state_info["crashes"],
+                },
+            )
 
     # 2. Detect a STOP or CRASH
     # Transition from a 'running-like' state to a 'stopped-like' state.
@@ -283,6 +301,22 @@ def handle_properties_changed(  # pylint: disable=too-many-statements
             LOGGER.error(*log_message)
             # Update Prometheus crash counter
             get_metrics().increment_crashes(service_name)
+            # Log structured crash event
+            if EVENT_LOGGER:
+                EVENT_LOGGER.log_event(
+                    event_type="crash",
+                    service=service_name,
+                    from_state=last_active_state,
+                    to_state=current_active_state,
+                    counters={
+                        "starts": last_state_info["starts"],
+                        "stops": last_state_info["stops"],
+                        "crashes": last_state_info["crashes"],
+                    },
+                    sub_state=current_sub_state,
+                    exit_code=current_exec_main_status,
+                    exit_code_type=current_exec_main_code,
+                )
         else:  # It's a clean stop (inactive, dead)
             log_message = (
                 "Service %s: %s -> %s (STOP) - Starts: %d, Stops: %d, Crashes: %d",
@@ -294,6 +328,19 @@ def handle_properties_changed(  # pylint: disable=too-many-statements
                 last_state_info["crashes"],
             )
             LOGGER.info(*log_message)
+            # Log structured stop event
+            if EVENT_LOGGER:
+                EVENT_LOGGER.log_event(
+                    event_type="stop",
+                    service=service_name,
+                    from_state=last_active_state,
+                    to_state=current_active_state,
+                    counters={
+                        "starts": last_state_info["starts"],
+                        "stops": last_state_info["stops"],
+                        "crashes": last_state_info["crashes"],
+                    },
+                )
 
     # 3. Handle specific transitions for clarity, without affecting counters
     # if already handled
@@ -324,6 +371,19 @@ def handle_properties_changed(  # pylint: disable=too-many-statements
         get_metrics().increment_restarts(service_name)
         get_metrics().increment_stops(service_name)
         get_metrics().increment_starts(service_name)
+        # Log structured restart event
+        if EVENT_LOGGER:
+            EVENT_LOGGER.log_event(
+                event_type="restart",
+                service=service_name,
+                from_state=last_active_state,
+                to_state=current_active_state,
+                counters={
+                    "starts": last_state_info["starts"],
+                    "stops": last_state_info["stops"],
+                    "crashes": last_state_info["crashes"],
+                },
+            )
     else:
         log_message = (
             "Service %s: %s -> %s (SubState: %s)",
@@ -557,7 +617,8 @@ def initialize_from_config(config: Config) -> None:
     """
     Initialize module-level variables from Config object.
     """
-    global MONITORED_SERVICES, MAX_SERVICE_NAME_LEN  # pylint: disable=global-statement
+    # pylint: disable=global-statement
+    global MONITORED_SERVICES, MAX_SERVICE_NAME_LEN, EVENT_LOGGER
 
     MONITORED_SERVICES = list(config.monitored_services)
 
@@ -566,6 +627,14 @@ def initialize_from_config(config: Config) -> None:
         MAX_SERVICE_NAME_LEN = max(len(s) for s in MONITORED_SERVICES)
     else:
         MAX_SERVICE_NAME_LEN = 30  # Default if no services
+
+    # Initialize event logger for structured JSON Lines logging
+    EVENT_LOGGER = ServiceEventLogger(
+        log_file=config.events_file,
+        max_bytes=config.events_max_bytes,
+        backup_count=config.events_backup_count,
+    )
+    LOGGER.info("Initialized event logger: %s", config.events_file)
 
     LOGGER.info("Initialized with %d monitored services", len(MONITORED_SERVICES))
 

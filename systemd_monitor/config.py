@@ -31,6 +31,10 @@ class Config:
         "debug": False,
         "prometheus_enabled": True,
         "prometheus_port": 9100,
+        # Event logging (JSON Lines format)
+        "events_file": "/var/log/systemd_monitor/events.jsonl",
+        "events_max_bytes": 10_485_760,  # 10 MB
+        "events_backup_count": 5,
     }
 
     def __init__(self, config_file: Optional[str] = None, **kwargs):
@@ -98,6 +102,21 @@ class Config:
     def prometheus_port(self) -> int:
         """Get Prometheus HTTP server port."""
         return self.config["prometheus_port"]
+
+    @property
+    def events_file(self) -> str:
+        """Get event log file path (JSON Lines format)."""
+        return self.config["events_file"]
+
+    @property
+    def events_max_bytes(self) -> int:
+        """Get maximum size of event log file before rotation."""
+        return self.config["events_max_bytes"]
+
+    @property
+    def events_backup_count(self) -> int:
+        """Get number of backup event log files to keep."""
+        return self.config["events_backup_count"]
 
     def save_config(self, config_file: str):
         """Save current configuration to file."""

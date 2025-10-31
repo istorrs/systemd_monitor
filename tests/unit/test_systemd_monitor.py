@@ -732,6 +732,9 @@ class TestInitializeFromConfig:
         """Test initialization with list of services."""
         mock_config = MagicMock()
         mock_config.monitored_services = ["test.service", "another.service"]
+        mock_config.events_file = "/tmp/test_events.jsonl"
+        mock_config.events_max_bytes = 1024
+        mock_config.events_backup_count = 2
 
         with patch.object(systemd_monitor.LOGGER, "info") as mock_log:
             systemd_monitor.initialize_from_config(mock_config)
@@ -746,6 +749,9 @@ class TestInitializeFromConfig:
         """Test initialization with empty service list."""
         mock_config = MagicMock()
         mock_config.monitored_services = []
+        mock_config.events_file = "/tmp/test_events.jsonl"
+        mock_config.events_max_bytes = 1024
+        mock_config.events_backup_count = 2
 
         with patch.object(systemd_monitor.LOGGER, "info") as mock_log:
             systemd_monitor.initialize_from_config(mock_config)
